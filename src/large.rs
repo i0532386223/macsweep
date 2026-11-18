@@ -141,7 +141,62 @@ impl Default for Large {
 }
 
 fn walk(min_bytes: u64, progress: Arc<AtomicUsize>, cancel: Arc<AtomicBool>) -> Vec<LargeFile> {
-    walk_root(&fsutil::home(), min_bytes, &progress, &cancel)
+    let mut files = walk_root(&fsutil::home(), min_bytes, &progress, &cancel);
+    // "Last opened" from Spotlight, like Finder shows; file times are touched
+    // by backups and indexing, so they're only the fallback.
+    let paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
+    for (f, t) in files.iter_mut().zip(spotlight_last_used(&paths)) {
+        if t.is_some() {
+            f.last_used = t;
+        }
+    }
+    files
+}
+
+/// kMDItemLastUsedDate for each path (None where Spotlight has no date).
+fn spotlight_last_used(paths: &[PathBuf]) -> Vec<Option<SystemTime>> {
+    let mut out = Vec::with_capacity(paths.len());
+    for chunk in paths.chunks(100) {
+        let text = std::process::Command::new("mdls")
+            .args(["-name", "kMDItemLastUsedDate"])
+            .args(chunk)
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        let vals: Vec<Option<SystemTime>> = text
+            .lines()
+            .filter(|l| l.starts_with("kMDItemLastUsedDate"))
+            .map(parse_mdls_date)
+            .collect();
+        // One line per file, in order; if that doesn't hold, trust none of it.
+        if vals.len() == chunk.len() {
+            out.extend(vals);
+        } else {
+            out.extend(chunk.iter().map(|_| None));
+        }
+    }
+    out
+}
+
+/// "kMDItemLastUsedDate = 2024-03-05 10:11:12 +0000" → time.
+fn parse_mdls_date(line: &str) -> Option<SystemTime> {
+    let v = line.split_once('=')?.1.trim();
+    let (date, rest) = v.split_once(' ')?;
+    let mut d = date.split('-').map(|x| x.parse::<i64>());
+    let (y, m, day) = (d.next()?.ok()?, d.next()?.ok()?, d.next()?.ok()?);
+    let mut t = rest.split(' ').next()?.split(':').map(|x| x.parse::<i64>());
+    let (hh, mm, ss) = (t.next()?.ok()?, t.next()?.ok()?, t.next()?.ok()?);
+    // Days since 1970-01-01 (civil calendar).
+    let (y2, m2) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let doy = (153 * m2 + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let secs = days * 86_400 + hh * 3600 + mm * 60 + ss;
+    u64::try_from(secs)
+        .ok()
+        .map(|s| SystemTime::UNIX_EPOCH + Duration::from_secs(s))
 }
 
 /// Lists big files under `root`, skipping places where deleting a single file
@@ -189,7 +244,7 @@ fn walk_root(root: &std::path::Path, min_bytes: u64, progress: &AtomicUsize, can
         let size = fsutil::allocated(&md);
         if size >= min_bytes {
             let path = entry.path();
-            let last_used = md.accessed().ok().or_else(|| md.modified().ok());
+            let last_used = md.modified().ok();
             found.push(LargeFile {
                 kind: Kind::of(&path),
                 path,
@@ -562,6 +617,13 @@ impl Large {
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn spotlight_dates_are_parsed() {
+        let t = parse_mdls_date("kMDItemLastUsedDate = 2024-03-05 10:11:12 +0000").unwrap();
+        assert_eq!(t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), 1_709_633_472);
+        assert!(parse_mdls_date("kMDItemLastUsedDate = (null)").is_none());
+    }
 
     #[test]
     fn app_data_libraries_hidden_folders_and_packages_are_never_listed() {
