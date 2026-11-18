@@ -125,6 +125,16 @@ pub fn reveal(p: &Path) {
     let _ = Command::new("open").arg("-R").arg(p).spawn();
 }
 
+/// Opens macOS Quick Look (the Space-bar preview) for a file.
+pub fn quick_look(p: &Path) {
+    let _ = Command::new("qlmanage")
+        .arg("-p")
+        .arg(p)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
 pub fn open(target: &str) {
     let _ = Command::new("open").arg(target).spawn();
 }

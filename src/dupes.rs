@@ -50,11 +50,19 @@ const DEV_DIRS: &[&str] = &[
     "node_modules",
     "__pycache__",
     "site-packages",
+    "venv",
     "Pods",
     "DerivedData",
     "Library",
     "Applications",
 ];
+
+/// Build and cache folders mark themselves with a standard file: Rust `target`
+/// and other tools write CACHEDIR.TAG, Python virtual environments have
+/// pyvenv.cfg. Their contents are generated, so duplicates there are expected.
+fn is_generated_dir(p: &Path) -> bool {
+    p.join("CACHEDIR.TAG").exists() || p.join("pyvenv.cfg").exists()
+}
 
 fn skip_dir(name: &str) -> bool {
     if name.starts_with('.') || DEV_DIRS.contains(&name) {
@@ -175,7 +183,7 @@ fn list_files(roots: &[PathBuf], min_bytes: u64, progress: &AtomicUsize, cancel:
                         .unwrap_or(false)
                 });
                 for e in children.iter_mut().flatten() {
-                    if e.file_type.is_dir() && skip_dir(&e.file_name.to_string_lossy()) {
+                    if e.file_type.is_dir() && (skip_dir(&e.file_name.to_string_lossy()) || is_generated_dir(&e.path())) {
                         e.read_children = None;
                     }
                 }
@@ -430,7 +438,7 @@ impl Dupes {
             ui.add_space(10.0);
             ui.label(theme::bold("Duplicates", 30.0));
             ui.label(theme::dim(
-                "Find identical copies of files in Desktop, Documents, Downloads,\nPictures, Movies and Music. One copy is always kept.",
+                "Find identical copies of files in Desktop, Documents, Downloads,\nPictures, Movies and Music. Files are matched by content, not by name,\nand one copy is always kept.",
                 15.0,
             ));
             ui.add_space(16.0);
@@ -591,7 +599,7 @@ impl Dupes {
             });
             ui.add_space(4.0);
             ui.label(theme::dim(
-                "Ticked copies are moved to the Trash. At least one copy is always kept.",
+                "Matched by content, not by name. Preview a copy before removing it. Ticked copies go to the Trash; one is always kept.",
                 12.0,
             ));
             ui.separator();
@@ -615,18 +623,34 @@ impl Dupes {
                             ui.add_space(6.0);
                             ui.label(theme::dim(fmt_age(f.modified), 12.5));
                             ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
-                                let r = ui.add(
-                                    egui::Label::new(theme::text(fsutil::pretty(&f.path), 13.0))
-                                        .truncate()
-                                        .sense(egui::Sense::click()),
-                                );
-                                if r.on_hover_text("Reveal in Finder").clicked() {
-                                    fsutil::reveal(&f.path);
-                                }
+                                ui.add(egui::Label::new(theme::text(fsutil::pretty(&f.path), 13.0)).truncate())
+                                    .on_hover_text(f.path.display().to_string());
                             });
                         });
                     });
-                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(30.0);
+                        if theme::mini_button(
+                            ui,
+                            format!("{}  Preview", icon::EYE),
+                            "Quick Look preview, like pressing Space in Finder",
+                        )
+                        .clicked()
+                        {
+                            fsutil::quick_look(&f.path);
+                        }
+                        if theme::mini_button(
+                            ui,
+                            format!("{}  Show in Finder", icon::FOLDER_OPEN),
+                            "Open the folder with this file selected",
+                        )
+                        .clicked()
+                        {
+                            fsutil::reveal(&f.path);
+                        }
+                    });
+                    ui.add_space(8.0);
+                    ui.separator();
                 }
             });
         });
@@ -716,6 +740,30 @@ mod tests {
             scan(&d, 1).is_empty(),
             "nothing in packages, dev or hidden folders may be listed"
         );
+    }
+
+    #[test]
+    fn build_and_virtualenv_folders_are_ignored() {
+        let d = tmp("generated");
+        let data = noise(40_000, 9);
+        write(
+            &d.join("proj/target/CACHEDIR.TAG"),
+            b"Signature: 8a477f597d28d172789f06886806bc55",
+        );
+        write(&d.join("proj/target/debug/deps/libfoo-1.rmeta"), &data);
+        write(&d.join("proj/target/release/deps/libfoo-2.rmeta"), &data);
+        write(&d.join("ml/env/pyvenv.cfg"), b"home = /usr/bin");
+        write(&d.join("ml/env/lib/a.so"), &data);
+        write(&d.join("ml/env/lib/b.so"), &data);
+        assert!(scan(&d, 1).is_empty());
+    }
+
+    #[test]
+    fn same_name_with_different_content_is_not_grouped() {
+        let d = tmp("samename");
+        write(&d.join("v1/thesis.pdf"), &noise(30_000, 10));
+        write(&d.join("v2/thesis.pdf"), &noise(30_000, 11));
+        assert!(scan(&d, 1).is_empty());
     }
 
     #[test]

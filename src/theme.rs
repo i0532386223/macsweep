@@ -35,6 +35,8 @@ pub mod icon {
     pub const TERMINAL: &str = "\u{E47E}";
     pub const GHOST: &str = "\u{E62A}";
     pub const COPY: &str = "\u{E1CA}";
+    pub const EYE: &str = "\u{E220}";
+    pub const FOLDER_OPEN: &str = "\u{E256}";
 }
 
 /// Background gradient + accent for one section.
@@ -354,6 +356,17 @@ pub fn round_button(ui: &mut Ui, label: &str, p: Palette, enabled: bool) -> Resp
         Color32::WHITE.gamma_multiply(if enabled { 1.0 } else { 0.5 }),
     );
     resp
+}
+
+/// Small rounded button used inside list rows.
+pub fn mini_button(ui: &mut Ui, label: impl Into<String>, hint: &str) -> Response {
+    ui.add(
+        egui::Button::new(semi(label, 12.0))
+            .fill(Color32::from_white_alpha(26))
+            .corner_radius(10)
+            .min_size(vec2(0.0, 26.0)),
+    )
+    .on_hover_text(hint)
 }
 
 /// Rounded "pill" button.
