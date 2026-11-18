@@ -67,7 +67,9 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 ## Install
 
 1. Download **`MacSweep-x.y.z.zip`** from [Releases](https://github.com/nihal4/macsweep/releases/latest), unzip it, and move **MacSweep** to **Applications**.
-2. MacSweep isn't notarized by Apple yet (that needs a paid developer account), so the first time, right-click the app → **Open** → **Open**. Or run:
+2. MacSweep isn't notarized by Apple yet (that needs a paid developer account), so macOS blocks it the first time. Either:
+   - Open it once, click **Done**, then go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway** (macOS 15 Sequoia and later; on older macOS you can right-click the app → **Open**), or
+   - run this once in Terminal:
    ```bash
    xattr -dr com.apple.quarantine /Applications/MacSweep.app
    ```
