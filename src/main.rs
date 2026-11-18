@@ -129,6 +129,8 @@ impl Sys {
 
 struct App {
     pane: Pane,
+    /// A background task that crashed, shown as a banner until dismissed.
+    failure: Option<String>,
     from: Palette,
     switched_at: f64,
     junk: junk::Junk,
@@ -143,6 +145,7 @@ impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::setup(&cc.egui_ctx);
         Self {
+            failure: None,
             pane: Pane::Smart,
             from: theme::SMART,
             switched_at: -10.0,
@@ -480,6 +483,36 @@ impl eframe::App for App {
         theme::paint_background(&ctx.layer_painter(egui::LayerId::background()), screen, p);
 
         self.sidebar(ui, now);
+        if let Some(f) = job::take_failure() {
+            self.failure = Some(f);
+        }
+        if let Some(msg) = self.failure.clone() {
+            egui::Panel::top("failure")
+                .frame(
+                    egui::Frame::new()
+                        .fill(theme::DANGER.gamma_multiply(0.85))
+                        .inner_margin(egui::Margin::symmetric(16, 8)),
+                )
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(theme::semi(
+                            format!(
+                                "{}  Something went wrong and that task stopped. Nothing else was changed. ({msg})",
+                                icon::WARNING
+                            ),
+                            12.5,
+                        ));
+                        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.link(theme::text("Dismiss", 12.5)).clicked() {
+                                self.failure = None;
+                            }
+                            if ui.link(theme::text("Report", 12.5)).clicked() {
+                                fsutil::open("https://github.com/nihal4/macsweep/issues/new");
+                            }
+                        });
+                    });
+                });
+        }
         egui::CentralPanel::default()
             .frame(egui::Frame::new().inner_margin(26))
             .show(ui, |ui| match self.pane {
