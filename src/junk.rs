@@ -10,6 +10,41 @@ pub struct Item {
     pub path: PathBuf,
     pub size: u64,
     pub selected: bool,
+    /// Cache of an app that is open right now; left unticked.
+    pub in_use: bool,
+}
+
+/// Bundle IDs and names of the apps running now (lower case), from
+/// `lsappinfo`, which needs no extra permission.
+fn running_apps() -> Vec<String> {
+    let out = std::process::Command::new("lsappinfo")
+        .arg("list")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    parse_running(&out)
+}
+
+fn parse_running(out: &str) -> Vec<String> {
+    let mut v = Vec::new();
+    for line in out.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("bundleID=\"") {
+            v.push(rest.trim_end_matches('"').to_lowercase());
+        } else if let Some(i) = line.find(") \"") {
+            if let Some(name) = line[i + 3..].split('"').next() {
+                v.push(name.to_lowercase());
+            }
+        }
+    }
+    v.retain(|s| !s.is_empty() && s != "[ null ]");
+    v
+}
+
+/// Is this cache folder (e.g. "com.google.chrome") used by a running app?
+fn used_by_running(name: &str, running: &[String]) -> bool {
+    let n = name.to_lowercase();
+    running.iter().any(|r| n == *r || n.starts_with(&format!("{r}.")))
 }
 
 pub struct Category {
@@ -69,7 +104,7 @@ pub enum Stage {
 
 pub struct Junk {
     pub cats: Vec<Category>,
-    scan: Option<Job<Vec<Vec<(PathBuf, u64)>>>>,
+    scan: Option<Job<Vec<Vec<(PathBuf, u64, bool)>>>>,
     clean: Option<Job<(u64, usize)>>,
     pub stage: Stage,
     focus: usize,
@@ -215,6 +250,8 @@ impl Junk {
         let roots: Vec<_> = self.cats.iter().map(|c| c.roots).collect();
         self.scan = Some(Job::spawn(ctx, move |_, _| {
             let home = fsutil::home();
+            let running = running_apps();
+            let caches = home.join("Library/Caches");
             roots
                 .iter()
                 .map(|rs| {
@@ -233,6 +270,13 @@ impl Junk {
                         .collect();
                     items.sort_unstable_by(|a, b| b.1.cmp(&a.1));
                     items
+                        .into_iter()
+                        .map(|(p, s)| {
+                            let busy = p.parent() == Some(caches.as_path())
+                                && p.file_name().is_some_and(|n| used_by_running(&n.to_string_lossy(), &running));
+                            (p, s, busy)
+                        })
+                        .collect::<Vec<_>>()
                 })
                 .collect()
         }));
@@ -257,10 +301,11 @@ impl Junk {
                 let on = c.default_on;
                 c.items = items
                     .into_iter()
-                    .map(|(path, size)| Item {
+                    .map(|(path, size, in_use)| Item {
                         path,
                         size,
-                        selected: on,
+                        selected: on && !in_use,
+                        in_use,
                     })
                     .collect();
             }
@@ -369,7 +414,7 @@ impl Junk {
                             let mut on = state.unwrap_or(true);
                             let cb = egui::Checkbox::new(&mut on, "").indeterminate(state.is_none());
                             if ui.add_enabled(!c.items.is_empty(), cb).changed() {
-                                c.items.iter_mut().for_each(|it| it.selected = on);
+                                c.items.iter_mut().for_each(|it| it.selected = on && !it.in_use);
                                 self.confirm = false;
                             }
                             theme::icon_tile(ui, c.glyph, c.color, 34.0);
@@ -411,6 +456,18 @@ impl Junk {
                 format!("{} of {} selected", fmt_size(c.selected_total()), fmt_size(c.total())),
                 12.5,
             ));
+            if c.items.iter().any(|i| i.in_use) {
+                ui.label(
+                    theme::dim(
+                        format!(
+                            "{}  Items marked \"In use\" belong to apps that are open now and are left unticked. Quit the app first to clean them safely.",
+                            icon::WARNING
+                        ),
+                        12.0,
+                    )
+                    .color(theme::WARN),
+                );
+            }
             ui.separator();
             if c.items.is_empty() {
                 theme::centered(ui, |ui| {
@@ -438,6 +495,9 @@ impl Junk {
                             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.add_space(6.0);
                                 ui.label(theme::dim(fmt_size(it.size), 13.0));
+                                if it.in_use {
+                                    theme::badge(ui, "In use", theme::WARN);
+                                }
                                 ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
                                     let resp = ui.add(
                                         egui::Label::new(theme::text(name, 13.5))
@@ -487,6 +547,17 @@ pub fn done_screen(ui: &mut Ui, p: Palette, title: &str, sub: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn caches_of_running_apps_are_recognised() {
+        let out = "2) \"Google Chrome\" ASN:0x0-0x2002:\n    bundleID=\"com.google.Chrome\"\n    bundle path=\"/Applications/Google Chrome.app\"\n";
+        let r = super::parse_running(out);
+        assert_eq!(r, vec!["google chrome".to_string(), "com.google.chrome".to_string()]);
+        assert!(super::used_by_running("com.google.Chrome", &r));
+        assert!(super::used_by_running("com.google.Chrome.helper", &r));
+        assert!(!super::used_by_running("com.google.Chromecast", &r));
+        assert!(!super::used_by_running("Homebrew", &r));
+    }
+
     #[test]
     fn every_category_stays_inside_the_allowlist() {
         for c in super::Junk::default().cats {
