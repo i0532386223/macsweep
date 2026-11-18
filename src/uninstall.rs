@@ -277,9 +277,43 @@ fn discover_in(dir: &Path, depth: usize, out: &mut Vec<(PathBuf, Option<Vec<Path
     }
 }
 
+/// True if `name` contains the bundle ID `id` as whole dot-separated parts:
+/// "com.foo.app.plist" and "group.com.foo.app" match "com.foo.app",
+/// "com.foo.apple" does not.
+fn id_in(name: &str, id: &str) -> bool {
+    if id.is_empty() {
+        return false;
+    }
+    name.match_indices(id).any(|(i, _)| {
+        let before = i == 0 || name.as_bytes()[i - 1] == b'.';
+        let end = i + id.len();
+        let after = end == name.len() || name.as_bytes()[end] == b'.';
+        before && after
+    })
+}
+
+/// Does this ~/Library item belong to the app with bundle ID `id`?
+/// A longer ID of another installed app wins: "com.google.chrome.canary.plist"
+/// belongs to Chrome Canary, not to Chrome.
+fn belongs_to(name: &str, id: &str, all_ids: &[String]) -> bool {
+    id_in(name, id)
+        && !all_ids
+            .iter()
+            .any(|o| o.len() > id.len() && o.starts_with(id) && o.as_bytes()[id.len()] == b'.' && id_in(name, o))
+}
+
 fn find_apps() -> Vec<AppInfo> {
     let index = library_index();
-    let mut apps: Vec<AppInfo> = discover()
+    let found = discover();
+    let all_ids: Vec<String> = found
+        .par_iter()
+        .flat_map_iter(|(p, pkg)| match pkg {
+            Some(inner) => inner.clone(),
+            None => vec![p.clone()],
+        })
+        .filter_map(|a| read_bundle(&a).id.map(|i| i.to_lowercase()))
+        .collect();
+    let mut apps: Vec<AppInfo> = found
         .into_par_iter()
         .filter_map(|(path, package)| {
             let main = match &package {
@@ -321,7 +355,7 @@ fn find_apps() -> Vec<AppInfo> {
                         .file_stem()
                         .map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    names.iter().any(|x| x == n || *x == stem) || bid.as_ref().is_some_and(|b| n.contains(b.as_str()))
+                    names.iter().any(|x| x == n || *x == stem) || bid.as_ref().is_some_and(|b| belongs_to(n, b, &all_ids))
                 })
                 .map(|(p, _, kind, data)| Leftover {
                     path: p.clone(),
@@ -915,6 +949,24 @@ mod tests {
         app(&d, "Solitaire", 1_000);
         fs::write(d.join(".DS_Store"), b"x").unwrap();
         assert!(matches!(classify(&d), Folder::Apps(a) if a.len() == 2));
+    }
+
+    #[test]
+    fn leftovers_of_a_sibling_app_are_not_taken() {
+        let ids = vec!["com.google.chrome".to_string(), "com.google.chrome.canary".to_string()];
+        let chrome = "com.google.chrome";
+        assert!(belongs_to("com.google.chrome.plist", chrome, &ids));
+        assert!(belongs_to("com.google.chrome", chrome, &ids));
+        assert!(
+            belongs_to("com.google.chrome.helper", chrome, &ids),
+            "its own helpers still count"
+        );
+        assert!(!belongs_to("com.google.chrome.canary.plist", chrome, &ids));
+        assert!(!belongs_to("com.google.chrome.canary", chrome, &ids));
+        assert!(belongs_to("com.google.chrome.canary", "com.google.chrome.canary", &ids));
+        assert!(!belongs_to("com.google.chromecast.plist", chrome, &ids));
+        assert!(belongs_to("ubf8t346g9.com.microsoft.teams", "com.microsoft.teams", &[]));
+        assert!(!belongs_to("com.microsoft.teams2.plist", "com.microsoft.teams", &[]));
     }
 
     #[test]
