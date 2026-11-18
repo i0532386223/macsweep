@@ -46,6 +46,8 @@ pub struct AppInfo {
     members: Vec<String>,
     /// Number of apps inside, when this entry is an install folder.
     package_apps: usize,
+    /// A shortcut whose app no longer exists.
+    broken: bool,
     leftovers: Vec<Leftover>,
     checked: bool,
 }
@@ -312,6 +314,7 @@ fn find_apps() -> Vec<AppInfo> {
                 },
                 bundle_id: b.id,
                 package_apps: package.as_ref().map_or(0, Vec::len),
+                broken: fsutil::is_broken_link(&path),
                 icon_app: main,
                 members,
                 name,
@@ -428,7 +431,7 @@ fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
     }
     let mut err = fsutil::move_to_trash(&paths).err();
     // Count only what is really gone.
-    let removed: Vec<&AppInfo> = apps.iter().filter(|a| !a.path.exists()).collect();
+    let removed: Vec<&AppInfo> = apps.iter().filter(|a| !fsutil::lexists(&a.path)).collect();
     let n = removed.len();
     let freed: u64 = removed.iter().map(|a| a.total()).sum();
     if !still_running.is_empty() {
@@ -670,7 +673,12 @@ impl Uninstaller {
                                     ui.with_layout(Layout::top_down(egui::Align::Min), |ui| {
                                         ui.add_space(8.0);
                                         ui.add(egui::Label::new(theme::semi(&app.name, 14.0)).truncate());
-                                        ui.label(theme::dim(app.version.clone().unwrap_or_default(), 11.5));
+                                        let sub = if app.broken {
+                                            "Broken shortcut".to_string()
+                                        } else {
+                                            app.version.clone().unwrap_or_default()
+                                        };
+                                        ui.label(theme::dim(sub, 11.5));
                                     });
                                 });
                             });
@@ -722,6 +730,9 @@ impl Uninstaller {
                     ui.horizontal(|ui| {
                         if app.app_store {
                             theme::badge(ui, "App Store", Color32::from_rgb(0x5a, 0xa8, 0xff));
+                        }
+                        if app.broken {
+                            theme::badge(ui, "Broken shortcut · the app it opened is gone", theme::WARN);
                         }
                         if app.package_apps > 0 {
                             theme::badge(

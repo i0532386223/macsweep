@@ -345,7 +345,7 @@ fn remove(plan: Vec<(u64, Vec<(PathBuf, Option<SystemTime>)>, Vec<PathBuf>)>) ->
     let gone: Vec<u64> = paths
         .iter()
         .zip(&sizes)
-        .filter(|(p, _)| !p.exists())
+        .filter(|(p, _)| !fsutil::lexists(p))
         .map(|(_, s)| *s)
         .collect();
     let n = gone.len();

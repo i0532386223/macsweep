@@ -243,9 +243,20 @@ pub fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
     if paths.is_empty() {
         return Ok(());
     }
+    let tdir = trash_dir();
     let refused: Vec<PathBuf> = paths
         .iter()
-        .filter(|p| p.exists() && trash::delete(p).is_err() && p.exists())
+        .filter(|p| lexists(p))
+        .filter(|p| {
+            // A link (e.g. a leftover shortcut in /Applications) is moved
+            // itself; Finder would try to follow it to its target.
+            let failed = if is_symlink(p) {
+                move_into(p, &tdir).is_err()
+            } else {
+                trash::delete(p).is_err()
+            };
+            failed && lexists(p)
+        })
         .cloned()
         .collect();
     let mut cancelled = false;
@@ -255,7 +266,7 @@ pub fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
     bump();
     let left: Vec<String> = paths
         .iter()
-        .filter(|p| p.exists())
+        .filter(|p| lexists(p))
         .map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
         .collect();
     if left.is_empty() {
@@ -265,6 +276,33 @@ pub fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
     } else {
         Err(format!("Couldn't remove {}. macOS denied permission.", left.join(", ")))
     }
+}
+
+/// True if something exists at this path, including a link whose target is gone.
+pub fn lexists(p: &Path) -> bool {
+    fs::symlink_metadata(p).is_ok()
+}
+
+pub fn is_symlink(p: &Path) -> bool {
+    fs::symlink_metadata(p).map(|m| m.file_type().is_symlink()).unwrap_or(false)
+}
+
+/// A link whose target no longer exists.
+pub fn is_broken_link(p: &Path) -> bool {
+    is_symlink(p) && !p.exists()
+}
+
+/// Moves an item into `dir`, adding a number if the name is taken.
+pub fn move_into(p: &Path, dir: &Path) -> std::io::Result<PathBuf> {
+    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut dest = dir.join(&name);
+    let mut i = 2;
+    while lexists(&dest) {
+        dest = dir.join(format!("{name} {i}"));
+        i += 1;
+    }
+    fs::rename(p, &dest)?;
+    Ok(dest)
 }
 
 /// Single-quotes a string for /bin/sh.
@@ -281,11 +319,11 @@ pub fn admin_trash_script(paths: &[PathBuf], trash_dir: &Path, user: &str, stamp
         .map(|(i, p)| {
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let mut dest = trash_dir.join(&name);
-            if dest.exists() {
+            if lexists(&dest) {
                 dest = trash_dir.join(format!("{name} {stamp}-{i}"));
             }
             format!(
-                "/bin/mv {src} {dst} && /usr/sbin/chown -R {u} {dst}",
+                "/bin/mv {src} {dst} && /usr/sbin/chown -hR {u} {dst}",
                 src = sh_quote(&p.to_string_lossy()),
                 dst = sh_quote(&dest.to_string_lossy()),
                 u = sh_quote(user),
@@ -419,8 +457,22 @@ mod tests {
         let s = admin_trash_script(&[p], &t, "me", 7);
         assert_eq!(
             s,
-            "/bin/mv '/Applications/Bob'\\''s \"Tool\" 1.0.app' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app' && /usr/sbin/chown -R 'me' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app'"
+            "/bin/mv '/Applications/Bob'\\''s \"Tool\" 1.0.app' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app' && /usr/sbin/chown -hR 'me' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app'"
         );
+    }
+
+    #[test]
+    fn broken_links_are_detected_and_moved() {
+        let d = std::env::temp_dir().join(format!("macsweep-link-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("trash")).unwrap();
+        let link = d.join("JDownloader2.app");
+        std::os::unix::fs::symlink(d.join("gone/JDownloader2.app"), &link).unwrap();
+        assert!(!link.exists(), "following the link finds nothing");
+        assert!(lexists(&link) && is_broken_link(&link), "but the link itself is there");
+        let dest = move_into(&link, &d.join("trash")).unwrap();
+        assert!(!lexists(&link));
+        assert!(is_symlink(&dest));
     }
 
     #[test]
