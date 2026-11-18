@@ -15,7 +15,7 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 
 ![Smart Scan](docs/smart-scan-results.jpg)
 
-[**⬇ Download MacSweep**](https://github.com/nihal4/macsweep/releases/latest) · [Report a bug](https://github.com/nihal4/macsweep/issues/new?template=bug_report.md) · [Request a feature](https://github.com/nihal4/macsweep/issues/new?template=feature_request.md)
+[**⬇ Download MacSweep**](https://github.com/nihal4/macsweep/releases/latest) · [Website](https://nihal4.github.io/macsweep/) · [Report a bug](https://github.com/nihal4/macsweep/issues/new?template=bug_report.md) · [Request a feature](https://github.com/nihal4/macsweep/issues/new?template=feature_request.md)
 
 </div>
 
@@ -49,6 +49,19 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 <td><img src="docs/cleaned.jpg" alt="Cleaned"></td>
 </tr>
 </table>
+
+## How MacSweep compares
+
+| | MacSweep | Mole (CLI) | Mole for Mac | CleanMyMac |
+|---|---|---|---|---|
+| Price | **Free** | Free | Paid, one-time | Paid |
+| Interface | **Graphical app** | Terminal | Graphical app | Graphical app |
+| Open source | **Yes, MIT** | Yes, GPL-3.0 | No | No |
+| Oldest macOS | **macOS 11** | see project | macOS 14 | see vendor |
+
+[Mole](https://github.com/tw93/Mole) is a far more mature project with many more features. If you're comfortable in Terminal, it's a great choice. MacSweep is for people who want a free graphical app with a strict, tested promise about their data.
+
+> **Not to be confused with** other, unrelated projects also named MacSweep. This is the Rust app by [nihal4](https://github.com/nihal4), at [nihal4.github.io/macsweep](https://nihal4.github.io/macsweep/).
 
 ## Install
 

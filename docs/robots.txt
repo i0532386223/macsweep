@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://nihal4.github.io/macsweep/sitemap.xml

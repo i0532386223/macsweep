@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacSweep by nihal4 – Free, Open-Source Mac Cleaner in Rust (CleanMyMac Alternative)</title>
+<meta name="description" content="MacSweep is a free, open-source Mac cleaner written in Rust. Clean junk and caches, find large files, fully uninstall apps and remove orphaned launch agents, without ever touching your browser profiles, email or app data.">
+<meta name="keywords" content="MacSweep, nihal4, Mac cleaner, free Mac cleaner, open source Mac cleaner, CleanMyMac alternative, Mole alternative, Mac uninstaller, clean Mac cache, Rust macOS app">
+<meta name="author" content="S. M. Nihal Ahmed (nihal4)">
+<link rel="canonical" href="https://nihal4.github.io/macsweep/">
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<meta name="theme-color" content="#1e0f3d">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="MacSweep">
+<meta property="og:title" content="MacSweep – free, open-source Mac cleaner in Rust">
+<meta property="og:description" content="Clean junk, find large files and fully uninstall apps. Free, MIT-licensed, ~7 MB, and built to never touch your data.">
+<meta property="og:url" content="https://nihal4.github.io/macsweep/">
+<meta property="og:image" content="https://nihal4.github.io/macsweep/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="MacSweep – free, open-source Mac cleaner in Rust">
+<meta name="twitter:description" content="Clean junk, find large files and fully uninstall apps without touching your data.">
+<meta name="twitter:image" content="https://nihal4.github.io/macsweep/social-preview.png">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "MacSweep",
+  "alternateName": "MacSweep by nihal4",
+  "description": "Free, open-source Mac cleaner written in Rust. Cleans junk and caches, finds large and old files, fully uninstalls apps with their leftovers and removes orphaned launch agents, while never deleting browser profiles, email or app data.",
+  "applicationCategory": "UtilitiesApplication",
+  "operatingSystem": "macOS 11 or later (Apple Silicon and Intel)",
+  "softwareVersion": "0.1.0",
+  "fileSize": "7MB",
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "url": "https://nihal4.github.io/macsweep/",
+  "downloadUrl": "https://github.com/nihal4/macsweep/releases/latest",
+  "installUrl": "https://github.com/nihal4/macsweep/releases/latest",
+  "screenshot": "https://nihal4.github.io/macsweep/smart-scan-results.jpg",
+  "image": "https://nihal4.github.io/macsweep/icon.png",
+  "sameAs": ["https://github.com/nihal4/macsweep"],
+  "author": { "@type": "Person", "name": "S. M. Nihal Ahmed", "url": "https://github.com/nihal4" },
+  "programmingLanguage": "Rust"
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "Is MacSweep free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. MacSweep is completely free and open source under the MIT license. There is no subscription, no paid tier, no ads and no telemetry."}},
+    {"@type": "Question", "name": "Is MacSweep safe? Will it delete my browser profiles or email?", "acceptedAnswer": {"@type": "Answer", "text": "No. Junk cleaning can only delete inside a fixed allowlist of cache, log and build folders, and every path is checked again right before deletion. Browser profiles (Chrome, Brave, Firefox, Safari), Mail, Messages, keychains, cookies, app containers and your documents are never touched, and automated tests guard this. Uninstalled apps, large files and launch agents go to the Trash, so you can restore them."}},
+    {"@type": "Question", "name": "How is MacSweep different from Mole?", "acceptedAnswer": {"@type": "Answer", "text": "Mole is an excellent, much more mature open-source Mac cleaner, but its free version is a command-line tool. Its graphical app, Mole for Mac, is a separate paid product that requires macOS 14 or later. MacSweep is a free, open-source graphical app that runs on macOS 11 or later."}},
+    {"@type": "Question", "name": "Is MacSweep a CleanMyMac alternative?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. MacSweep covers the core CleanMyMac jobs of cleaning system junk, finding large files, uninstalling apps with their leftovers and managing launch agents, for free and as open source. CleanMyMac has many more features, such as malware scanning and performance tools."}},
+    {"@type": "Question", "name": "Which Macs does MacSweep support?", "acceptedAnswer": {"@type": "Answer", "text": "MacSweep is a universal app that runs natively on Apple Silicon (M1, M2, M3, M4 and later) and Intel Macs with macOS 11 Big Sur or later."}},
+    {"@type": "Question", "name": "Is this the same as other projects called MacSweep?", "acceptedAnswer": {"@type": "Answer", "text": "No. Several unrelated projects share the name. This MacSweep is the Rust app by nihal4, published at github.com/nihal4/macsweep and listed in awesome-mac and open-source-mac-os-apps."}}
+  ]
+}
+</script>
+
+<style>
+  :root {
+    --plum: #1e0f3d;
+    --plum-deep: #140a2b;
+    --magenta: #d94fc9;
+    --lilac: #ede6f7;
+    --muted: #b3a6cc;
+    --mint: #5fd6a8;
+    --line: rgba(237, 230, 247, 0.14);
+    --round: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --text: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--plum-deep); }
+  body {
+    margin: 0;
+    color: var(--lilac);
+    font: 17px/1.6 var(--text);
+    background:
+      radial-gradient(900px 600px at 85% -10%, rgba(217, 79, 201, 0.32), transparent 70%),
+      linear-gradient(180deg, var(--plum) 0%, var(--plum-deep) 70%);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  a:focus-visible, summary:focus-visible { outline: 3px solid var(--magenta); outline-offset: 3px; border-radius: 6px; }
+  .wrap { width: min(1120px, 100% - 48px); margin-inline: auto; }
+
+  /* Header */
+  .top { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
+  .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; font: 600 19px var(--round); }
+  .brand img { width: 36px; height: 36px; }
+  .brand small { font: 400 14px var(--text); color: var(--muted); }
+  .top nav { display: flex; gap: 22px; font-size: 15px; }
+  .top nav a { text-decoration: none; color: var(--muted); }
+  .top nav a:hover { color: var(--lilac); }
+
+  /* Hero */
+  .hero { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 7fr); gap: 56px; align-items: center; padding: 56px 0 88px; }
+  h1 {
+    font: 700 clamp(40px, 5.4vw, 66px)/1.02 var(--round);
+    letter-spacing: -0.025em;
+    margin: 0 0 22px;
+    text-wrap: balance;
+  }
+  .lede { font-size: 19px; color: var(--muted); max-width: 30em; margin: 0 0 32px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 14px 26px; border-radius: 999px; text-decoration: none;
+    font: 600 17px var(--round);
+  }
+  .btn-primary { background: linear-gradient(180deg, #e875da, var(--magenta)); color: #fff; box-shadow: 0 10px 30px rgba(217, 79, 201, 0.35); }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-ghost { border: 1.5px solid var(--line); }
+  .btn-ghost:hover { border-color: var(--muted); }
+  .fine { margin-top: 18px; font-size: 14px; color: var(--muted); }
+  .shot {
+    width: 100%; height: auto; display: block;
+    border-radius: 18px;
+    box-shadow: 0 40px 80px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--line);
+  }
+
+  /* Sections */
+  section { padding: 72px 0; border-top: 1px solid var(--line); }
+  h2 { font: 700 clamp(30px, 3.4vw, 42px)/1.1 var(--round); letter-spacing: -0.02em; margin: 0 0 14px; }
+  .intro { color: var(--muted); max-width: 40em; margin: 0 0 40px; }
+
+  /* Ledger: the signature element */
+  .ledger { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 22px; overflow: hidden; }
+  .ledger > div { padding: 30px 32px; }
+  .ledger .never { background: rgba(95, 214, 168, 0.07); border-left: 1px solid var(--line); }
+  .ledger h3 { font: 700 22px var(--round); margin: 0 0 6px; }
+  .ledger p { margin: 0 0 18px; color: var(--muted); font-size: 15px; }
+  .ledger ul { list-style: none; margin: 0; padding: 0; }
+  .ledger li { padding: 10px 0; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; }
+  .ledger li span { font: 13.5px var(--mono); color: var(--muted); text-align: right; overflow-wrap: anywhere; }
+  .never h3 { color: var(--mint); }
+
+  /* Features */
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 36px 40px; }
+  .feature img { width: 100%; border-radius: 12px; box-shadow: 0 0 0 1px var(--line); margin-bottom: 16px; }
+  .feature h3 { font: 600 20px var(--round); margin: 0 0 6px; }
+  .feature p { margin: 0; color: var(--muted); font-size: 16px; }
+
+  /* Comparison */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 16px; min-width: 640px; }
+  th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th { font: 600 16px var(--round); color: var(--muted); }
+  thead th.us { color: var(--lilac); }
+  td.us { background: rgba(217, 79, 201, 0.10); font-weight: 600; }
+  tbody th { font-weight: 500; color: var(--muted); }
+  .note { margin-top: 20px; color: var(--muted); font-size: 15px; max-width: 46em; }
+
+  /* Install */
+  #install h2 { margin-bottom: 32px; }
+  .steps { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 22px; max-width: 46em; }
+  .steps li { counter-increment: s; display: grid; grid-template-columns: 44px 1fr; gap: 16px; }
+  .steps li::before {
+    content: counter(s); width: 36px; height: 36px; border-radius: 50%;
+    display: grid; place-items: center; font: 700 17px var(--round);
+    background: rgba(217, 79, 201, 0.2); color: #f4b8ec;
+  }
+  .steps strong { font-family: var(--round); }
+  code { font: 14px var(--mono); background: rgba(237, 230, 247, 0.08); padding: 2px 7px; border-radius: 6px; overflow-wrap: anywhere; }
+
+  /* FAQ */
+  details { border-top: 1px solid var(--line); max-width: 52em; }
+  details:last-of-type { border-bottom: 1px solid var(--line); }
+  summary { cursor: pointer; padding: 20px 0; font: 600 19px var(--round); list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--magenta); font-size: 24px; line-height: 1; transition: transform 0.2s; }
+  details[open] summary::after { transform: rotate(45deg); }
+  details p { margin: 0 0 22px; color: var(--muted); }
+
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  footer { padding: 48px 0 64px; border-top: 1px solid var(--line); color: var(--muted); font-size: 15px; }
+  footer p { margin: 0 0 8px; }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; padding-top: 28px; }
+    .ledger { grid-template-columns: 1fr; }
+    .ledger .never { border-left: 0; border-top: 1px solid var(--line); }
+    .top nav { display: none; }
+    .ledger > div { padding: 24px 20px; }
+    .ledger li { flex-direction: column; gap: 2px; }
+    .ledger li span { text-align: left; overflow-wrap: normal; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header class="wrap top">
+  <a class="brand" href="./">
+    <img src="icon.png" alt="" width="36" height="36">
+    <span>MacSweep <small>by nihal4</small></span>
+  </a>
+  <nav aria-label="Page sections">
+    <a href="#safety">Safety</a>
+    <a href="#compare">Compare</a>
+    <a href="#install">Install</a>
+    <a href="#faq">FAQ</a>
+    <a href="https://github.com/nihal4/macsweep">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div>
+      <h1>The Mac cleaner that leaves your data alone.</h1>
+      <p class="lede">MacSweep is a free, open-source Mac cleaner written in Rust. It clears junk, finds forgotten large files and fully uninstalls apps, and it can never delete your browser profiles, email or app data.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/nihal4/macsweep/releases/latest">Download for Mac</a>
+        <a class="btn btn-ghost" href="https://github.com/nihal4/macsweep">View source on GitHub</a>
+      </div>
+      <p class="fine">Free and MIT licensed. About 7 MB. Apple Silicon and Intel, macOS 11 or later.</p>
+    </div>
+    <img class="shot" src="smart-scan-results.jpg" width="1180" height="760"
+         alt="MacSweep Smart Scan showing 697 MB of junk found across caches, logs, Xcode data, developer caches, ML model caches and Trash, with a round Clean button">
+  </div>
+
+  <section id="safety">
+    <div class="wrap">
+      <h2>What it cleans, and what it never touches</h2>
+      <p class="intro">Some cleaners have wiped people's browser profiles and mailboxes. MacSweep can only delete inside a fixed list of disposable folders, and it checks every path again right before deleting. Automated tests guard the right-hand column.</p>
+      <div class="ledger">
+        <div>
+          <h3>Cleans</h3>
+          <p>Disposable files that apps rebuild on their own.</p>
+          <ul>
+            <li>App caches <span>~/Library/Caches</span></li>
+            <li>Logs and crash reports <span>~/Library/Logs</span></li>
+            <li>Xcode build data <span>DerivedData</span></li>
+            <li>npm and Gradle caches <span>~/.npm, ~/.gradle</span></li>
+            <li>ML model downloads, opt-in <span>~/.cache/huggingface</span></li>
+            <li>Trash <span>~/.Trash</span></li>
+          </ul>
+        </div>
+        <div class="never">
+          <h3>Never touches</h3>
+          <p>Your accounts, history and saved work.</p>
+          <ul>
+            <li>Chrome and Brave profiles <span>Application Support</span></li>
+            <li>Firefox and Safari data <span>Profiles, ~/Library/Safari</span></li>
+            <li>Mail and Messages <span>~/Library/Mail</span></li>
+            <li>Passwords and keychains <span>~/Library/Keychains</span></li>
+            <li>Cookies and logins <span>~/Library/Cookies</span></li>
+            <li>Your documents <span>~/Documents</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>Everything a Mac cleaner should do</h2>
+      <p class="intro">Four tools in one small native app, with nothing running in the background.</p>
+      <div class="features">
+        <div class="feature">
+          <img src="system-junk.jpg" alt="System Junk screen listing cache, log and Xcode categories with sizes and checkboxes" loading="lazy">
+          <h3>System Junk</h3>
+          <p>Review caches, logs and developer leftovers file by file before anything is removed.</p>
+        </div>
+        <div class="feature">
+          <img src="uninstaller.jpg" alt="Uninstaller screen showing apps with icons, sizes and their related support files" loading="lazy">
+          <h3>Uninstaller</h3>
+          <p>Remove apps with their leftovers. Each app shows its real size, version, chip type and last-opened date.</p>
+        </div>
+        <div class="feature">
+          <img src="large-files.jpg" alt="Large and Old Files screen grouping big files into videos, archives, installers and models" loading="lazy">
+          <h3>Large and old files</h3>
+          <p>Find forgotten videos, installers, archives and model checkpoints, grouped by type.</p>
+        </div>
+        <div class="feature">
+          <img src="launch-agents.jpg" alt="Launch Agents screen flagging orphaned background items whose app is gone" loading="lazy">
+          <h3>Launch agents</h3>
+          <p>Spot background helpers left behind by apps you already deleted, and remove them.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="compare">
+    <div class="wrap">
+      <h2>How MacSweep compares</h2>
+      <p class="intro">An honest look at the options people usually ask about.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col"><span class="sr">Feature</span></th>
+              <th scope="col" class="us">MacSweep</th>
+              <th scope="col">Mole (CLI)</th>
+              <th scope="col">Mole for Mac</th>
+              <th scope="col">CleanMyMac</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Price</th><td class="us">Free</td><td>Free</td><td>Paid, one-time</td><td>Paid</td></tr>
+            <tr><th scope="row">Interface</th><td class="us">Graphical app</td><td>Terminal</td><td>Graphical app</td><td>Graphical app</td></tr>
+            <tr><th scope="row">Open source</th><td class="us">Yes, MIT</td><td>Yes, GPL-3.0</td><td>No</td><td>No</td></tr>
+            <tr><th scope="row">Oldest macOS</th><td class="us">macOS 11</td><td>See project</td><td>macOS 14</td><td>See vendor</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Mole is a far more mature project with many more features. If you're comfortable in Terminal, it's a great choice. MacSweep is for people who want a free graphical app with a strict, tested promise about their data.</p>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Install in a minute</h2>
+      <ol class="steps">
+        <li><div><strong>Download</strong> the latest <code>MacSweep-x.y.z.zip</code> from <a href="https://github.com/nihal4/macsweep/releases/latest">GitHub Releases</a>, unzip it and move MacSweep to Applications.</div></li>
+        <li><div><strong>Open it the first time</strong> with right-click, then Open. MacSweep isn't notarized by Apple yet, so macOS asks once. You can also run <code>xattr -dr com.apple.quarantine /Applications/MacSweep.app</code>.</div></li>
+        <li><div><strong>Turn on Full Disk Access</strong> in System Settings, Privacy &amp; Security, then relaunch MacSweep. It needs this to see the Trash and Mail attachments.</div></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <h2>Questions</h2>
+      <details>
+        <summary>Is MacSweep free?</summary>
+        <p>Yes. MacSweep is completely free and open source under the MIT license. There's no subscription, no paid tier, no ads and no telemetry.</p>
+      </details>
+      <details>
+        <summary>Will it delete my browser profiles or email?</summary>
+        <p>No. Junk cleaning can only delete inside a fixed allowlist of cache, log and build folders, and every path is checked again right before deletion. Browser profiles, Mail, Messages, keychains, cookies, app containers and documents are never touched, and automated tests guard this. Uninstalled apps, large files and launch agents go to the Trash, so you can put them back.</p>
+      </details>
+      <details>
+        <summary>How is it different from Mole?</summary>
+        <p>Mole is an excellent, much more mature open-source cleaner, but its free version runs in Terminal. Its graphical app, Mole for Mac, is a separate paid product for macOS 14 or later. MacSweep is a free, open-source graphical app that runs on macOS 11 or later.</p>
+      </details>
+      <details>
+        <summary>Is it a CleanMyMac alternative?</summary>
+        <p>For the core jobs, yes: cleaning junk, finding large files, uninstalling apps with their leftovers and managing launch agents. CleanMyMac has many more features, such as malware scanning and performance tools.</p>
+      </details>
+      <details>
+        <summary>Which Macs does it support?</summary>
+        <p>It's a universal app for Apple Silicon (M1 and later) and Intel Macs running macOS 11 Big Sur or later.</p>
+      </details>
+      <details>
+        <summary>Is this the same as other apps called MacSweep?</summary>
+        <p>No. Several unrelated projects share the name. This MacSweep is the Rust app by nihal4, published at <a href="https://github.com/nihal4/macsweep">github.com/nihal4/macsweep</a> and listed in awesome-mac and open-source-mac-os-apps.</p>
+      </details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>MacSweep is made by <a href="https://github.com/nihal4">S. M. Nihal Ahmed (nihal4)</a> and released under the MIT license.</p>
+    <p><a href="https://github.com/nihal4/macsweep">Source code</a> &nbsp;&nbsp; <a href="https://github.com/nihal4/macsweep/issues">Report a bug</a> &nbsp;&nbsp; <a href="https://github.com/nihal4/macsweep/releases">All releases</a></p>
+  </div>
+</footer>
+</body>
+</html>

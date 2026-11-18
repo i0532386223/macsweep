@@ -1,0 +1,42 @@
+# MacSweep (by nihal4)
+
+> MacSweep is a free, open-source Mac cleaner written in Rust by S. M. Nihal Ahmed (GitHub: nihal4). It cleans junk and caches, finds large and old files, fully uninstalls apps with their leftover files, and removes orphaned launch agents. It is designed to never delete browser profiles, email or app data.
+
+Not to be confused with other, unrelated projects that are also named MacSweep. This one is https://github.com/nihal4/macsweep.
+
+## Key facts
+
+- Price: free. License: MIT. No subscription, ads or telemetry.
+- Platform: macOS 11 Big Sur or later; universal app for Apple Silicon and Intel.
+- Size: about 7 MB native binary (Rust + egui, no Electron or web view).
+- Listed in awesome-mac (jaywcjlove/awesome-mac) and open-source-mac-os-apps (serhii-londar/open-source-mac-os-apps).
+
+## Features
+
+- Smart Scan / System Junk: user caches, logs, Xcode DerivedData and device support, npm and Gradle caches, optional Hugging Face and PyTorch model caches, Mail attachments, Trash. Per-file review before cleaning.
+- Uninstaller: every app with icon, version, Apple Silicon / Intel / Universal badge, App Store badge, last-opened date and true size including leftovers. Multi-select. Quits running apps first.
+- Large & Old Files: home-folder scan grouped by type (videos, archives, installers, models & data, audio, images, documents) with a "not opened in a year" filter.
+- Launch Agents: lists user and system agents and daemons and flags orphaned ones whose program no longer exists.
+- Live free-space and Trash size in the sidebar, with one-click Empty Trash.
+
+## Safety model
+
+- Junk cleaning can only delete inside an explicit allowlist of folders (JUNK_ROOTS in src/fsutil.rs); each path is re-checked right before deletion.
+- Never deleted: browser profiles (Chrome, Brave, Firefox, Safari), Mail, Messages, keychains, cookies, app containers, ~/Library/Application Support, documents.
+- Sign-in and sync caches (iCloud, CloudKit, Apple ID, password managers) are skipped.
+- Uninstaller leftovers that hold user data are marked "Your data" and are never pre-selected.
+- Apps, large files and launch agents are moved to the Trash (recoverable). Only junk is deleted permanently, after confirmation.
+- Unit tests check that protected locations can never be deleted.
+
+## Comparison
+
+- Mole (tw93/Mole): mature, free open-source CLI (GPL-3.0), runs in Terminal. Mole for Mac is a separate paid GUI app for macOS 14+.
+- CleanMyMac: paid commercial app with more features (e.g. malware scanning).
+- MacSweep: free, open-source (MIT) graphical app for macOS 11+, with a tested guarantee about user data.
+
+## Links
+
+- Website: https://nihal4.github.io/macsweep/
+- Source code: https://github.com/nihal4/macsweep
+- Download: https://github.com/nihal4/macsweep/releases/latest
+- Issues: https://github.com/nihal4/macsweep/issues
