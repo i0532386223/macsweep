@@ -21,7 +21,7 @@ const EDGE: u64 = 16 * 1024;
 
 /// Folders that are really packages (libraries, bundles, projects). Their
 /// internal "duplicates" are intentional; touching them corrupts the package.
-const PACKAGE_EXT: &[&str] = &[
+pub(crate) const PACKAGE_EXT: &[&str] = &[
     "app",
     "photoslibrary",
     "photolibrary",
@@ -64,14 +64,16 @@ fn is_generated_dir(p: &Path) -> bool {
     p.join("CACHEDIR.TAG").exists() || p.join("pyvenv.cfg").exists()
 }
 
-fn skip_dir(name: &str) -> bool {
-    if name.starts_with('.') || DEV_DIRS.contains(&name) {
-        return true;
-    }
+/// True for bundles like "Photos Library.photoslibrary" or "Foo.app".
+pub(crate) fn is_package(name: &str) -> bool {
     Path::new(name)
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .is_some_and(|e| PACKAGE_EXT.contains(&e.as_str()))
+}
+
+fn skip_dir(name: &str) -> bool {
+    name.starts_with('.') || DEV_DIRS.contains(&name) || is_package(name)
 }
 
 #[derive(Clone)]

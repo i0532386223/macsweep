@@ -5,6 +5,7 @@ use crate::junk::{busy_screen, done_screen};
 use crate::theme::{self, Palette, icon};
 use eframe::egui::{self, Color32, Layout, Ui};
 use std::collections::HashSet;
+use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -135,19 +136,38 @@ impl Default for Large {
 }
 
 fn walk(min_bytes: u64, progress: Arc<AtomicUsize>, cancel: Arc<AtomicBool>) -> Vec<LargeFile> {
+    walk_root(&fsutil::home(), min_bytes, &progress, &cancel)
+}
+
+/// Lists big files under `root`, skipping places where deleting a single file
+/// breaks something or loses data you can't see:
+/// - ~/Library (app data, browser profiles, Mail, iCloud Drive)
+/// - hidden folders (the Trash, .git, tool caches)
+/// - packages such as apps and Photos or Music libraries
+/// - files that live only in iCloud/Dropbox (no local data): deleting one
+///   would remove it from the cloud on every device.
+fn walk_root(root: &std::path::Path, min_bytes: u64, progress: &AtomicUsize, cancel: &Arc<AtomicBool>) -> Vec<LargeFile> {
     let cancel_cb = cancel.clone();
-    let walker = jwalk::WalkDir::new(fsutil::home())
+    let library = root.join("Library");
+    let walker = jwalk::WalkDir::new(root)
         .skip_hidden(false)
         .follow_links(false)
-        .process_read_dir(move |_, _, _, children| {
+        .process_read_dir(move |_, dir, _, children| {
             if cancel_cb.load(Ordering::Relaxed) {
                 children.clear();
                 return;
             }
-            // Treat app bundles as one item — the Uninstaller handles them.
+            children.retain(|c| {
+                c.as_ref()
+                    .map(|e| !e.file_name.to_string_lossy().starts_with('.'))
+                    .unwrap_or(false)
+            });
             for e in children.iter_mut().flatten() {
-                if e.file_type.is_dir() && e.file_name.to_string_lossy().ends_with(".app") {
-                    e.read_children = None;
+                if e.file_type.is_dir() {
+                    let name = e.file_name.to_string_lossy();
+                    if crate::dupes::is_package(&name) || dir.join(&e.file_name) == library {
+                        e.read_children = None;
+                    }
                 }
             }
         });
@@ -158,6 +178,9 @@ fn walk(min_bytes: u64, progress: Arc<AtomicUsize>, cancel: Arc<AtomicBool>) -> 
             continue;
         }
         let Ok(md) = entry.metadata() else { continue };
+        if md.blocks() == 0 {
+            continue; // cloud-only placeholder
+        }
         let size = fsutil::allocated(&md);
         if size >= min_bytes {
             let path = entry.path();
@@ -280,6 +303,14 @@ impl Large {
                 if theme::round_button(ui, "Scan", p, true).clicked() {
                     self.start(&ctx);
                 }
+                ui.add_space(8.0);
+                ui.label(theme::dim(
+                    format!(
+                        "{}  App data, Photos and Music libraries, the Trash and iCloud-only files are never listed.",
+                        icon::LOCK_SIMPLE
+                    ),
+                    12.5,
+                ));
             });
             return;
         }
@@ -453,5 +484,34 @@ impl Large {
                     }
                 });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn app_data_libraries_hidden_folders_and_packages_are_never_listed() {
+        let d = std::env::temp_dir().join(format!("macsweep-large-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        let big = vec![1u8; 20_000];
+        for p in [
+            "Downloads/movie.mp4",
+            "Library/Application Support/Google/Chrome/Default/History",
+            "Library/Mail/V10/mail.emlx",
+            ".Trash/old.dmg",
+            "code/.git/objects/pack/p.pack",
+            "Pictures/Photos Library.photoslibrary/originals/a.heic",
+            "Music/Music Library.musiclibrary/Library.musicdb",
+        ] {
+            let f = d.join(p);
+            fs::create_dir_all(f.parent().unwrap()).unwrap();
+            fs::write(&f, &big).unwrap();
+        }
+        let found = walk_root(&d, 1, &AtomicUsize::new(0), &Arc::new(AtomicBool::new(false)));
+        let names: Vec<_> = found.iter().map(|f| f.path.strip_prefix(&d).unwrap().to_path_buf()).collect();
+        assert_eq!(names, vec![PathBuf::from("Downloads/movie.mp4")]);
     }
 }
