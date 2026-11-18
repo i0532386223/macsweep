@@ -1188,6 +1188,7 @@ dependencies = [
  "libc",
  "memmap2",
  "plist",
+ "png",
  "rayon",
  "trash",
 ]

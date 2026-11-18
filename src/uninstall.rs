@@ -422,6 +422,43 @@ fn load_icon(app: &Path, icon_file: Option<&str>) -> Option<ColorImage> {
     None
 }
 
+/// Newer apps keep their icon in an asset catalog instead of an .icns file.
+/// For those, ask macOS (Quick Look) to render the icon Finder shows.
+fn system_icon(app: &Path) -> Option<ColorImage> {
+    let dir = std::env::temp_dir().join(format!("macsweep-icons-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    Command::new("qlmanage")
+        .args(["-t", "-s", "128", "-o"])
+        .arg(&dir)
+        .arg(app)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()?;
+    let file = dir.join(format!("{}.png", app.file_name()?.to_string_lossy()));
+    let img = decode_png(&file);
+    let _ = std::fs::remove_file(&file);
+    img
+}
+
+fn decode_png(path: &Path) -> Option<ColorImage> {
+    let mut dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
+    dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut r = dec.read_info().ok()?;
+    let mut buf = vec![0u8; r.output_buffer_size()?];
+    let info = r.next_frame(&mut buf).ok()?;
+    let (w, h) = (info.width as usize, info.height as usize);
+    let px = &buf[..info.buffer_size()];
+    let rgba: Vec<u8> = match info.color_type {
+        png::ColorType::Rgba => px.to_vec(),
+        png::ColorType::Rgb => px.chunks(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
+        png::ColorType::GrayscaleAlpha => px.chunks(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect(),
+        png::ColorType::Grayscale => px.iter().flat_map(|&g| [g, g, g, 255]).collect(),
+        png::ColorType::Indexed => return None,
+    };
+    (rgba.len() == w * h * 4).then(|| downscale(&rgba, w, h))
+}
+
 /// Box-filter resize to ICON_PX with alpha weighting (keeps edges clean).
 fn downscale(src: &[u8], w: usize, h: usize) -> ColorImage {
     let mut out = vec![0u8; ICON_PX * ICON_PX * 4];
@@ -581,7 +618,11 @@ impl Uninstaller {
             if !need.is_empty() {
                 self.icon_job = Some(Job::spawn(&ctx, move |_, _| {
                     need.into_par_iter()
-                        .filter_map(|(p, app, f)| load_icon(&app, f.as_deref()).map(|img| (p, img)))
+                        .filter_map(|(p, app, f)| {
+                            load_icon(&app, f.as_deref())
+                                .or_else(|| system_icon(&app))
+                                .map(|img| (p, img))
+                        })
                         .collect()
                 }));
             }
@@ -1001,6 +1042,22 @@ mod tests {
         app(&d, "Solitaire", 1_000);
         fs::write(d.join(".DS_Store"), b"x").unwrap();
         assert!(matches!(classify(&d), Folder::Apps(a) if a.len() == 2));
+    }
+
+    #[test]
+    fn png_icons_decode_to_icon_size() {
+        let d = tmp("png");
+        let f = d.join("i.png");
+        {
+            let w = std::io::BufWriter::new(fs::File::create(&f).unwrap());
+            let mut e = png::Encoder::new(w, 128, 128);
+            e.set_color(png::ColorType::Rgba);
+            e.set_depth(png::BitDepth::Eight);
+            let mut wr = e.write_header().unwrap();
+            wr.write_image_data(&vec![200u8; 128 * 128 * 4]).unwrap();
+        }
+        let img = decode_png(&f).unwrap();
+        assert_eq!(img.size, [ICON_PX, ICON_PX]);
     }
 
     #[test]
