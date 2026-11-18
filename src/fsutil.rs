@@ -440,6 +440,33 @@ pub fn disk_info() -> Option<(u64, u64)> {
     Some((s.f_blocks as u64 * frsize, s.f_bavail as u64 * frsize))
 }
 
+/// Free space the way Finder counts it: includes space macOS can clear on its
+/// own (purgeable caches, old local snapshots). Asked through Foundation via
+/// JavaScript for Automation, so no extra libraries are needed. None if it
+/// can't be read; callers then use the plain number from `disk_info`.
+pub fn finder_available() -> Option<u64> {
+    const JS: &str = "ObjC.import('Foundation');\
+var u=$.NSURL.fileURLWithPath('/');var r=Ref();\
+u.getResourceValueForKeyError(r,$.NSURLVolumeAvailableCapacityForImportantUsageKey,null);\
+String(r[0].longLongValue)";
+    let out = Command::new("osascript").args(["-l", "JavaScript", "-e", JS]).output().ok()?;
+    parse_bytes(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_bytes(s: &str) -> Option<u64> {
+    s.trim().parse::<u64>().ok().filter(|&v| v > 0)
+}
+
+/// The name of the startup disk ("Macintosh HD" unless you renamed it).
+/// /Volumes holds a link to "/" with that name.
+pub fn startup_disk_name() -> String {
+    children(Path::new("/Volumes"))
+        .into_iter()
+        .find(|v| fs::read_link(v).is_ok_and(|t| t == Path::new("/")))
+        .and_then(|v| v.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "Macintosh HD".into())
+}
+
 /// Full Disk Access check: these locations are only readable with it.
 /// Several probes are used because not every Mac has every folder.
 pub fn has_full_disk_access() -> bool {
@@ -512,6 +539,14 @@ mod tests {
             s,
             "/bin/mv '/Applications/Bob'\\''s \"Tool\" 1.0.app' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app' && /usr/sbin/chown -hR 'me' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app'"
         );
+    }
+
+    #[test]
+    fn finder_free_space_output_is_parsed_safely() {
+        assert_eq!(parse_bytes("123456789\n"), Some(123456789));
+        assert_eq!(parse_bytes(""), None);
+        assert_eq!(parse_bytes("undefined"), None);
+        assert_eq!(parse_bytes("0"), None);
     }
 
     #[test]

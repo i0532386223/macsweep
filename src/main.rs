@@ -58,6 +58,11 @@ impl Pane {
 /// Live system numbers shown in the sidebar and dashboard.
 struct Sys {
     disk: Option<(u64, u64)>,
+    /// Finder's "available" (includes purgeable space), refreshed in the background.
+    finder_free: Option<u64>,
+    finder_job: Option<Job<Option<u64>>>,
+    finder_at: f64,
+    disk_name: String,
     trash: Option<u64>,
     fda: bool,
     last_refresh: f64,
@@ -74,6 +79,10 @@ impl Sys {
     fn new() -> Self {
         Self {
             disk: fsutil::disk_info(),
+            finder_free: None,
+            finder_job: None,
+            finder_at: -100.0,
+            disk_name: fsutil::startup_disk_name(),
             trash: None,
             fda: fsutil::has_full_disk_access(),
             last_refresh: 0.0,
@@ -106,10 +115,18 @@ impl Sys {
         if changes != self.seen_changes && self.trash_job.is_none() {
             self.seen_changes = changes;
             self.disk = fsutil::disk_info();
+            self.finder_at = -100.0;
             self.trash_job = Some(Job::spawn(ctx, |_, _| fsutil::trash_size()));
         }
         if let Some(t) = job::poll(&mut self.trash_job, ctx) {
             self.trash = Some(t);
+        }
+        if self.finder_job.is_none() && now - self.finder_at > 15.0 {
+            self.finder_at = now;
+            self.finder_job = Some(Job::spawn(ctx, |_, _| fsutil::finder_available()));
+        }
+        if let Some(v) = job::poll(&mut self.finder_job, ctx) {
+            self.finder_free = v;
         }
         if let Some((freed, failed)) = job::poll(&mut self.empty_job, ctx) {
             self.disk = fsutil::disk_info();
@@ -124,6 +141,18 @@ impl Sys {
             };
             self.empty_note = Some((msg, now + if failed > 0 { 12.0 } else { 5.0 }));
         }
+    }
+}
+
+impl Sys {
+    /// (total, available) with Finder's notion of available when we have it.
+    fn space(&self) -> Option<(u64, u64)> {
+        let (total, free) = self.disk?;
+        let free = match self.finder_free {
+            Some(f) if f >= free && f <= total => f,
+            _ => free,
+        };
+        Some((total, free))
     }
 }
 
@@ -260,7 +289,7 @@ impl App {
                 ui.with_layout(Layout::bottom_up(egui::Align::Min), |ui| {
                     self.trash_row(ui, now);
                     ui.add_space(8.0);
-                    if let Some((total, free)) = self.sys.disk {
+                    if let Some((total, free)) = self.sys.space() {
                         let used = total.saturating_sub(free);
                         let frac = used as f32 / total.max(1) as f32;
                         let color = if frac > 0.9 { theme::DANGER } else { Color32::WHITE };
@@ -271,7 +300,7 @@ impl App {
                         theme::usage_bar(ui, frac, color, 6.0);
                         ui.horizontal(|ui| {
                             ui.label(theme::ic(icon::HARD_DRIVE, 15.0));
-                            ui.label(theme::semi("Macintosh HD", 13.0));
+                            ui.label(theme::semi(&self.sys.disk_name, 13.0));
                         });
                     }
                 });
@@ -352,7 +381,7 @@ impl App {
         }
         match self.junk.stage {
             junk::Stage::Done(freed, _) => {
-                let free = self.sys.disk.map(|d| fsutil::fmt_size(d.1)).unwrap_or_default();
+                let free = self.sys.space().map(|d| fsutil::fmt_size(d.1)).unwrap_or_default();
                 if junk::done_screen(
                     ui,
                     p,
@@ -424,7 +453,7 @@ impl App {
                     ui.add_space(((ui.available_width() - (w * n + 10.0 * (n - 1.0))) / 2.0).max(0.0));
                     let (free, frac) = self
                         .sys
-                        .disk
+                        .space()
                         .map(|(t, f)| (fsutil::fmt_size(f), (t - f) as f32 / t.max(1) as f32))
                         .unwrap_or(("—".into(), 0.0));
                     stat(ui, w, icon::HARD_DRIVE, theme::APPS.accent, &free, "available", Some(frac));
