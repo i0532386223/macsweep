@@ -62,6 +62,7 @@ struct Sys {
     fda: bool,
     last_refresh: f64,
     seen_changes: u64,
+    trash_sig: u64,
     trash_job: Option<Job<u64>>,
     empty_job: Option<Job<(u64, usize)>>,
     confirm_empty_until: f64,
@@ -77,6 +78,7 @@ impl Sys {
             fda: fsutil::has_full_disk_access(),
             last_refresh: 0.0,
             seen_changes: u64::MAX,
+            trash_sig: fsutil::trash_signature(),
             trash_job: None,
             empty_job: None,
             confirm_empty_until: 0.0,
@@ -91,6 +93,12 @@ impl Sys {
             self.last_refresh = now;
             self.disk = fsutil::disk_info();
             self.fda = fsutil::has_full_disk_access();
+            // Things trashed or put back in Finder count too.
+            let sig = fsutil::trash_signature();
+            if sig != self.trash_sig {
+                self.trash_sig = sig;
+                self.seen_changes = u64::MAX;
+            }
         }
         ctx.request_repaint_after(std::time::Duration::from_secs(2));
 

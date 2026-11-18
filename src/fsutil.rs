@@ -380,6 +380,16 @@ pub fn trash_dirs() -> Vec<PathBuf> {
     v
 }
 
+/// Changes whenever something is put in or taken out of any Trash
+/// (by Finder or by us), so the sidebar can refresh without re-measuring.
+pub fn trash_signature() -> u64 {
+    trash_dirs()
+        .iter()
+        .filter_map(|d| fs::metadata(d).ok())
+        .map(|m| (m.mtime() as u64).wrapping_mul(1_000_000_007) ^ m.mtime_nsec() as u64 ^ m.nlink())
+        .fold(0u64, |a, b| a.wrapping_mul(31).wrapping_add(b))
+}
+
 pub fn trash_size() -> u64 {
     trash_dirs().iter().map(|d| size_of(d)).sum()
 }
