@@ -482,6 +482,18 @@ impl eframe::App for App {
         let screen = ctx.content_rect();
         theme::paint_background(&ctx.layer_painter(egui::LayerId::background()), screen, p);
 
+        // The title bar is hidden, so the empty strip along the top moves the
+        // window like a title bar would (double-click zooms it).
+        let strip = egui::Rect::from_min_size(screen.min, vec2(screen.width(), 26.0));
+        let drag = ui.interact(strip, egui::Id::unique("window_drag"), Sense::click_and_drag());
+        if drag.drag_started() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
+        if drag.double_clicked() {
+            let max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+        }
+
         self.sidebar(ui, now);
         if let Some(f) = job::take_failure() {
             self.failure = Some(f);
