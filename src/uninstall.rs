@@ -499,7 +499,18 @@ fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
     // Count only what is really gone.
     let removed: Vec<&AppInfo> = apps.iter().filter(|a| !fsutil::lexists(&a.path)).collect();
     let n = removed.len();
-    let freed: u64 = removed.iter().map(|a| a.total()).sum();
+    // Support files only count if they really left too.
+    let freed: u64 = removed
+        .iter()
+        .map(|a| {
+            a.size
+                + a.leftovers
+                    .iter()
+                    .filter(|l| l.selected && !fsutil::lexists(&l.path))
+                    .map(|l| l.size)
+                    .sum::<u64>()
+        })
+        .sum();
     if !still_running.is_empty() {
         err = Some(format!(
             "{} is still running — quit it and try again.",
