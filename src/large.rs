@@ -34,7 +34,7 @@ impl Kind {
         Kind::Other,
     ];
 
-    fn of(p: &std::path::Path) -> Kind {
+    pub fn of(p: &std::path::Path) -> Kind {
         let ext = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
         match ext.as_str() {
             "mp4" | "mov" | "mkv" | "avi" | "m4v" | "webm" | "wmv" | "flv" => Kind::Video,
@@ -63,7 +63,7 @@ impl Kind {
             Kind::Other => "Other",
         }
     }
-    fn glyph(self) -> &'static str {
+    pub fn glyph(self) -> &'static str {
         match self {
             Kind::Video => icon::FILE_VIDEO,
             Kind::Archive => icon::FILE_ZIP,
@@ -75,7 +75,7 @@ impl Kind {
             Kind::Other => icon::FILE,
         }
     }
-    fn color(self) -> Color32 {
+    pub fn color(self) -> Color32 {
         let c = Color32::from_rgb;
         match self {
             Kind::Video => c(0xe2, 0x4a, 0x6a),

@@ -34,6 +34,7 @@ pub mod icon {
     pub const STOP: &str = "\u{E46C}";
     pub const TERMINAL: &str = "\u{E47E}";
     pub const GHOST: &str = "\u{E62A}";
+    pub const COPY: &str = "\u{E1CA}";
 }
 
 /// Background gradient + accent for one section.
@@ -63,6 +64,11 @@ pub const APPS: Palette = Palette {
     top: Color32::from_rgb(0x0c, 0x1d, 0x52),
     bottom: Color32::from_rgb(0x2b, 0x6a, 0xcf),
     accent: Color32::from_rgb(0x5a, 0xa8, 0xff),
+};
+pub const DUPES: Palette = Palette {
+    top: Color32::from_rgb(0x16, 0x12, 0x4a),
+    bottom: Color32::from_rgb(0x55, 0x3c, 0xc8),
+    accent: Color32::from_rgb(0x96, 0x82, 0xff),
 };
 pub const AGENTS: Palette = Palette {
     top: Color32::from_rgb(0x0b, 0x2a, 0x3c),

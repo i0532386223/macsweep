@@ -35,6 +35,7 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 | ✨ **Smart Scan** | One click finds caches, logs, build leftovers and Trash, and shows a summary by category. |
 | 🧹 **System Junk** | Review every category and file before cleaning, with per-file checkboxes. Developer (Xcode, npm, Gradle) and ML-model caches (Hugging Face, PyTorch) are included. |
 | 📁 **Large & Old Files** | Finds big files in your home folder, grouped by kind (videos, archives, installers, models & data…), with a "not opened in a year" filter. |
+| 🗂️ **Duplicates** | Finds exact duplicate files (same size and same BLAKE3 content hash) in Desktop, Documents, Downloads, Pictures, Movies and Music. Always keeps at least one copy, never looks inside Photos/Music libraries or app data, and moves extras to the Trash. |
 | 📦 **Uninstaller** | Every app with its icon, version, App Store / Apple Silicon / Intel badges, last-opened date and **true size including leftovers**. Select several apps at once. |
 | 🚀 **Launch Agents** | Lists background helpers and flags **orphaned** ones whose app is already gone. |
 | 💾 **Live disk & Trash** | The sidebar always shows free space and Trash size, updates instantly after every clean, and has a one-click **Empty Trash**. |
@@ -105,7 +106,7 @@ UNIVERSAL=1 ./bundle.sh     # Apple Silicon + Intel in one app
 
 ## Roadmap
 
-- [ ] Duplicate file finder
+- [x] Duplicate file finder (v0.2)
 - [ ] Menu-bar mini monitor (disk, RAM, CPU)
 - [ ] Browser cache cleanup per browser (cache only, never profiles)
 - [ ] Scheduled scans and reminders

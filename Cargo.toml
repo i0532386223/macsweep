@@ -1,6 +1,6 @@
 [package]
 name = "macsweep"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A fast, lightweight, open-source Mac cleaner"
 license = "MIT"
@@ -8,6 +8,7 @@ repository = "https://github.com/nihal4/macsweep"
 authors = ["S. M. Nihal Ahmed"]
 
 [dependencies]
+blake3 = "1.8.7"
 eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts"] }
 icns = { version = "0.5.0", default-features = false, features = ["pngio"] }
 jwalk = "0.9.0"

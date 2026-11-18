@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MacSweep by nihal4 – Free, Open-Source Mac Cleaner in Rust (CleanMyMac Alternative)</title>
-<meta name="description" content="MacSweep is a free, open-source Mac cleaner written in Rust. Clean junk and caches, find large files, fully uninstall apps and remove orphaned launch agents, without ever touching your browser profiles, email or app data.">
+<meta name="description" content="MacSweep is a free, open-source Mac cleaner written in Rust. Clean junk and caches, find large and duplicate files, fully uninstall apps and remove orphaned launch agents, without ever touching your browser profiles, email or app data.">
 <meta name="keywords" content="MacSweep, nihal4, Mac cleaner, free Mac cleaner, open source Mac cleaner, CleanMyMac alternative, Mole alternative, Mac uninstaller, clean Mac cache, Rust macOS app">
 <meta name="author" content="S. M. Nihal Ahmed (nihal4)">
 <link rel="canonical" href="https://nihal4.github.io/macsweep/">
@@ -31,10 +31,10 @@
   "@type": "SoftwareApplication",
   "name": "MacSweep",
   "alternateName": "MacSweep by nihal4",
-  "description": "Free, open-source Mac cleaner written in Rust. Cleans junk and caches, finds large and old files, fully uninstalls apps with their leftovers and removes orphaned launch agents, while never deleting browser profiles, email or app data.",
+  "description": "Free, open-source Mac cleaner written in Rust. Cleans junk and caches, finds large and old files and exact duplicates, fully uninstalls apps with their leftovers and removes orphaned launch agents, while never deleting browser profiles, email or app data.",
   "applicationCategory": "UtilitiesApplication",
   "operatingSystem": "macOS 11 or later (Apple Silicon and Intel)",
-  "softwareVersion": "0.1.0",
+  "softwareVersion": "0.2.0",
   "fileSize": "7MB",
   "license": "https://opensource.org/licenses/MIT",
   "isAccessibleForFree": true,
@@ -263,12 +263,17 @@
   <section id="features">
     <div class="wrap">
       <h2>Everything a Mac cleaner should do</h2>
-      <p class="intro">Four tools in one small native app, with nothing running in the background.</p>
+      <p class="intro">Five tools in one small native app, with nothing running in the background.</p>
       <div class="features">
         <div class="feature">
           <img src="system-junk.jpg" alt="System Junk screen listing cache, log and Xcode categories with sizes and checkboxes" loading="lazy">
           <h3>System Junk</h3>
           <p>Review caches, logs and developer leftovers file by file before anything is removed.</p>
+        </div>
+        <div class="feature">
+          <img src="duplicates.jpg" alt="Duplicates screen listing groups of identical files, keeping the oldest copy of each and marking the others for removal" loading="lazy">
+          <h3>Duplicates</h3>
+          <p>Find exact copies of files in your personal folders. One copy is always kept, and extras go to the Trash.</p>
         </div>
         <div class="feature">
           <img src="uninstaller.jpg" alt="Uninstaller screen showing apps with icons, sizes and their related support files" loading="lazy">

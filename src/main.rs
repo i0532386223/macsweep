@@ -1,4 +1,5 @@
 mod agents;
+mod dupes;
 mod fsutil;
 mod job;
 mod junk;
@@ -15,17 +16,19 @@ enum Pane {
     Smart,
     Junk,
     Large,
+    Dupes,
     Apps,
     Agents,
 }
 
 impl Pane {
-    const ALL: [Pane; 5] = [Pane::Smart, Pane::Junk, Pane::Large, Pane::Apps, Pane::Agents];
+    const ALL: [Pane; 6] = [Pane::Smart, Pane::Junk, Pane::Large, Pane::Dupes, Pane::Apps, Pane::Agents];
     fn title(self) -> &'static str {
         match self {
             Pane::Smart => "Smart Scan",
             Pane::Junk => "System Junk",
             Pane::Large => "Large & Old Files",
+            Pane::Dupes => "Duplicates",
             Pane::Apps => "Uninstaller",
             Pane::Agents => "Launch Agents",
         }
@@ -35,6 +38,7 @@ impl Pane {
             Pane::Smart => icon::SPARKLE,
             Pane::Junk => icon::BROOM,
             Pane::Large => icon::FOLDER,
+            Pane::Dupes => icon::COPY,
             Pane::Apps => icon::PACKAGE,
             Pane::Agents => icon::ROCKET_LAUNCH,
         }
@@ -44,6 +48,7 @@ impl Pane {
             Pane::Smart => theme::SMART,
             Pane::Junk => theme::JUNK,
             Pane::Large => theme::LARGE,
+            Pane::Dupes => theme::DUPES,
             Pane::Apps => theme::APPS,
             Pane::Agents => theme::AGENTS,
         }
@@ -107,6 +112,7 @@ struct App {
     switched_at: f64,
     junk: junk::Junk,
     large: large::Large,
+    dupes: dupes::Dupes,
     apps: uninstall::Uninstaller,
     agents: agents::Agents,
     sys: Sys,
@@ -121,6 +127,7 @@ impl App {
             switched_at: -10.0,
             junk: Default::default(),
             large: Default::default(),
+            dupes: Default::default(),
             apps: Default::default(),
             agents: Default::default(),
             sys: Sys::new(),
@@ -456,6 +463,7 @@ impl eframe::App for App {
                 Pane::Smart => self.smart(ui, p, now),
                 Pane::Junk => self.junk.ui(ui, p),
                 Pane::Large => self.large.ui(ui, p),
+                Pane::Dupes => self.dupes.ui(ui, p),
                 Pane::Apps => self.apps.ui(ui, p),
                 Pane::Agents => self.agents.ui(ui, p),
             });
