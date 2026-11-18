@@ -746,7 +746,7 @@ impl Uninstaller {
         ui.horizontal(|ui| {
             theme::icon_tile(ui, icon::PACKAGE, theme::APPS.accent, 46.0);
             ui.vertical(|ui| {
-                ui.label(theme::bold(format!("{} apps", self.apps.len()), 28.0));
+                ui.label(theme::bold(theme::plural(self.apps.len(), "app"), 28.0));
                 ui.label(theme::dim(format!("{} including their support files", fmt_size(total)), 13.5));
             });
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {

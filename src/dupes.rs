@@ -421,7 +421,10 @@ impl Dupes {
 
         if let Some(job) = &self.scan {
             let (title, sub) = if self.state.stage.load(Ordering::Relaxed) == 0 {
-                ("Listing your files…", format!("{} files checked", job.progress()))
+                (
+                    "Listing your files…",
+                    format!("{} checked", crate::theme::plural(job.progress(), "file")),
+                )
             } else {
                 ("Comparing file contents…", format!("{} candidates hashed", job.progress()))
             };
@@ -449,7 +452,12 @@ impl Dupes {
             let sub = err
                 .clone()
                 .unwrap_or_else(|| "One copy of each file was kept. Empty the Trash to get the space back.".into());
-            if done_screen(ui, p, &format!("{n} duplicates · {} moved to Trash", fmt_size(*freed)), &sub) {
+            if done_screen(
+                ui,
+                p,
+                &format!("{} · {} moved to Trash", theme::plural(*n, "duplicate"), fmt_size(*freed)),
+                &sub,
+            ) {
                 self.done = None;
             }
             return;
@@ -511,7 +519,7 @@ impl Dupes {
                 ui.label(theme::dim(
                     format!(
                         "taken up by {} in {}",
-                        theme::plural(copies, "extra copy").replace("copys", "copies"),
+                        theme::plural(copies, "extra copy"),
                         theme::plural(self.groups.len(), "group")
                     ),
                     13.5,

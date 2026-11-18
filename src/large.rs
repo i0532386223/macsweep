@@ -306,7 +306,7 @@ impl Large {
                 p,
                 icon::MAGNIFYING_GLASS,
                 "Searching your home folder…",
-                &format!("{} items checked", job.progress()),
+                &format!("{} checked", theme::plural(job.progress(), "item")),
             );
             theme::centered(ui, |ui| {
                 ui.add_space(14.0);
@@ -326,7 +326,12 @@ impl Large {
                 Some(e) => format!("Some files couldn't be moved: {e}"),
                 None => "Empty the Trash (bottom-left) to get the space back.".into(),
             };
-            if done_screen(ui, p, &format!("{n} files · {} moved to Trash", fmt_size(*freed)), &sub) {
+            if done_screen(
+                ui,
+                p,
+                &format!("{} · {} moved to Trash", theme::plural(*n, "file"), fmt_size(*freed)),
+                &sub,
+            ) {
                 self.done = None;
             }
             return;
@@ -501,7 +506,7 @@ impl Large {
                             ui.vertical(|ui| {
                                 ui.add_space(7.0);
                                 ui.label(theme::semi(label, 13.0));
-                                ui.label(theme::dim(format!("{count} files"), 11.0));
+                                ui.label(theme::dim(theme::plural(count, "file"), 11.0));
                             });
                             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.label(theme::semi(fmt_size(size), 12.5))

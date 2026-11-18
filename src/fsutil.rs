@@ -115,7 +115,8 @@ pub fn fmt_age(t: Option<SystemTime>) -> String {
     let days = SystemTime::now().duration_since(t).map(|d| d.as_secs() / 86_400).unwrap_or(0);
     match days {
         0 => "today".into(),
-        1..=59 => format!("{days} days ago"),
+        1 => "yesterday".into(),
+        2..=59 => format!("{days} days ago"),
         60..=729 => format!("{} months ago", days / 30),
         _ => format!("{} years ago", days / 365),
     }

@@ -466,7 +466,25 @@ pub fn centered(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
 
 /// "1 file", "3 files".
 pub fn plural(n: usize, word: &str) -> String {
-    if n == 1 { format!("1 {word}") } else { format!("{n} {word}s") }
+    if n == 1 {
+        format!("1 {word}")
+    } else if let Some(stem) = word.strip_suffix('y').filter(|s| !s.ends_with(['a', 'e', 'o', 'u'])) {
+        format!("{n} {stem}ies")
+    } else {
+        format!("{n} {word}s")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn plurals_read_naturally() {
+        assert_eq!(super::plural(1, "file"), "1 file");
+        assert_eq!(super::plural(3, "file"), "3 files");
+        assert_eq!(super::plural(0, "item"), "0 items");
+        assert_eq!(super::plural(2, "extra copy"), "2 extra copies");
+        assert_eq!(super::plural(2, "day"), "2 days");
+    }
 }
 
 /// Lays out a row of pills centered in the available width.

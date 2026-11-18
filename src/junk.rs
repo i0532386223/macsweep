@@ -352,7 +352,12 @@ impl Junk {
             }
             Stage::Done(freed, failed) => {
                 let note = if failed > 0 {
-                    format!("{failed} items were in use or protected and were skipped.")
+                    format!(
+                        "{} {} in use or protected and {} skipped.",
+                        theme::plural(failed, "item"),
+                        if failed == 1 { "was" } else { "were" },
+                        if failed == 1 { "was" } else { "were" }
+                    )
                 } else {
                     "Your Mac is a little lighter now.".into()
                 };
@@ -425,7 +430,7 @@ impl Junk {
                                 let sub = if c.items.is_empty() {
                                     "Nothing to clean".to_string()
                                 } else {
-                                    format!("{} items", c.items.len())
+                                    theme::plural(c.items.len(), "item")
                                 };
                                 ui.label(theme::dim(sub, 11.5));
                             });
