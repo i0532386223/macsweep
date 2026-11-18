@@ -410,7 +410,6 @@ fn osascript(script: &str) -> String {
 /// Quits each app if running, then moves app + selected leftovers to the Trash.
 fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
     let mut paths = Vec::new();
-    let mut freed = 0;
     let mut still_running = Vec::new();
     'apps: for a in &apps {
         for bid in &a.members {
@@ -431,7 +430,7 @@ fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
     // Count only what is really gone.
     let removed: Vec<&AppInfo> = apps.iter().filter(|a| !a.path.exists()).collect();
     let n = removed.len();
-    freed = removed.iter().map(|a| a.total()).sum();
+    let freed: u64 = removed.iter().map(|a| a.total()).sum();
     if !still_running.is_empty() {
         err = Some(format!(
             "{} is still running — quit it and try again.",
