@@ -37,7 +37,7 @@ Not to be confused with other, unrelated projects that are also named MacSweep. 
 
 ## Links
 
-- Website: https://nihal4.github.io/macsweep/
+- Website: https://macsweep-app.netlify.app/
 - Source code: https://github.com/nihal4/macsweep
 - Download: https://github.com/nihal4/macsweep/releases/latest
 - Issues: https://github.com/nihal4/macsweep/issues

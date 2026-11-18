@@ -2,12 +2,18 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>
+  // The site moved from GitHub Pages to Netlify: send old visitors to the new address.
+  if (location.hostname.endsWith("github.io")) {
+    location.replace("https://macsweep-app.netlify.app" + location.pathname.replace(/^\/macsweep/, "") + location.search + location.hash);
+  }
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MacSweep by nihal4 – Free, Open-Source Mac Cleaner in Rust (CleanMyMac Alternative)</title>
 <meta name="description" content="MacSweep is a free, open-source Mac cleaner written in Rust. Clean junk and caches, find large and duplicate files, fully uninstall apps and remove orphaned launch agents, without ever touching your browser profiles, email or app data.">
 <meta name="keywords" content="MacSweep, nihal4, Mac cleaner, free Mac cleaner, open source Mac cleaner, CleanMyMac alternative, Mole alternative, Mac uninstaller, clean Mac cache, Rust macOS app">
 <meta name="author" content="S. M. Nihal Ahmed (nihal4)">
-<link rel="canonical" href="https://nihal4.github.io/macsweep/">
+<link rel="canonical" href="https://macsweep-app.netlify.app/">
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
 <meta name="theme-color" content="#1e0f3d">
@@ -16,14 +22,14 @@
 <meta property="og:site_name" content="MacSweep">
 <meta property="og:title" content="MacSweep – free, open-source Mac cleaner in Rust">
 <meta property="og:description" content="Clean junk, find large files and fully uninstall apps. Free, MIT-licensed, ~7 MB, and built to never touch your data.">
-<meta property="og:url" content="https://nihal4.github.io/macsweep/">
-<meta property="og:image" content="https://nihal4.github.io/macsweep/social-preview.png">
+<meta property="og:url" content="https://macsweep-app.netlify.app/">
+<meta property="og:image" content="https://macsweep-app.netlify.app/social-preview.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="MacSweep – free, open-source Mac cleaner in Rust">
 <meta name="twitter:description" content="Clean junk, find large files and fully uninstall apps without touching your data.">
-<meta name="twitter:image" content="https://nihal4.github.io/macsweep/social-preview.png">
+<meta name="twitter:image" content="https://macsweep-app.netlify.app/social-preview.png">
 
 <script type="application/ld+json">
 {
@@ -39,11 +45,11 @@
   "license": "https://opensource.org/licenses/MIT",
   "isAccessibleForFree": true,
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "url": "https://nihal4.github.io/macsweep/",
+  "url": "https://macsweep-app.netlify.app/",
   "downloadUrl": "https://github.com/nihal4/macsweep/releases/latest",
   "installUrl": "https://github.com/nihal4/macsweep/releases/latest",
-  "screenshot": "https://nihal4.github.io/macsweep/smart-scan-results.jpg",
-  "image": "https://nihal4.github.io/macsweep/icon.png",
+  "screenshot": "https://macsweep-app.netlify.app/smart-scan-results.jpg",
+  "image": "https://macsweep-app.netlify.app/icon.png",
   "sameAs": ["https://github.com/nihal4/macsweep"],
   "author": { "@type": "Person", "name": "S. M. Nihal Ahmed", "url": "https://github.com/nihal4" },
   "programmingLanguage": "Rust"

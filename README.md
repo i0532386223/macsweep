@@ -15,7 +15,7 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 
 ![Smart Scan](docs/smart-scan-results.jpg)
 
-[**⬇ Download MacSweep**](https://github.com/nihal4/macsweep/releases/latest) · [Website](https://nihal4.github.io/macsweep/) · [Report a bug](https://github.com/nihal4/macsweep/issues/new?template=bug_report.md) · [Request a feature](https://github.com/nihal4/macsweep/issues/new?template=feature_request.md)
+[**⬇ Download MacSweep**](https://github.com/nihal4/macsweep/releases/latest) · [Website](https://macsweep-app.netlify.app/) · [Report a bug](https://github.com/nihal4/macsweep/issues/new?template=bug_report.md) · [Request a feature](https://github.com/nihal4/macsweep/issues/new?template=feature_request.md)
 
 </div>
 
@@ -62,7 +62,7 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 
 [Mole](https://github.com/tw93/Mole) is a far more mature project with many more features. If you're comfortable in Terminal, it's a great choice. MacSweep is for people who want a free graphical app with a strict, tested promise about their data.
 
-> **Not to be confused with** other, unrelated projects also named MacSweep. This is the Rust app by [nihal4](https://github.com/nihal4), at [nihal4.github.io/macsweep](https://nihal4.github.io/macsweep/).
+> **Not to be confused with** other, unrelated projects also named MacSweep. This is the Rust app by [nihal4](https://github.com/nihal4), at [macsweep-app.netlify.app](https://macsweep-app.netlify.app/).
 
 ## Install
 
