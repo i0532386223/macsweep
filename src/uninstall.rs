@@ -178,6 +178,25 @@ enum Folder {
     None,
 }
 
+fn norm(s: &str) -> String {
+    s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+/// The app named like its folder ("Cisco Packet Tracer 8.2.2" → "Cisco Packet Tracer 8.2.2.app").
+fn named_like(folder: &Path, apps: &[PathBuf]) -> Option<PathBuf> {
+    let fname = norm(&folder.file_name().unwrap_or_default().to_string_lossy());
+    apps.iter()
+        .find(|a| {
+            let n = norm(&a.file_stem().unwrap_or_default().to_string_lossy());
+            !n.is_empty() && !fname.is_empty() && (fname.starts_with(&n) || n.starts_with(&fname))
+        })
+        .cloned()
+}
+
+/// Folders macOS (or the user) uses to group many unrelated apps. They are
+/// never removed as one unit.
+const SHARED_FOLDERS: &[&str] = &["utilities", "games", "tools", "apps", "applications", "other", "developer"];
+
 fn classify(dir: &Path) -> Folder {
     let entries: Vec<PathBuf> = fsutil::children(dir)
         .into_iter()
@@ -185,9 +204,13 @@ fn classify(dir: &Path) -> Folder {
         .filter(|p| p.extension().is_none_or(|e| e != "localized"))
         .collect();
     let apps: Vec<PathBuf> = entries.iter().filter(|p| is_app(p)).cloned().collect();
+    let dir_name = dir.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
     if apps.is_empty() {
         Folder::None
-    } else if entries.len() > apps.len() {
+    } else if entries.len() > apps.len() && !SHARED_FOLDERS.contains(&dir_name.as_str()) && named_like(dir, &apps).is_some() {
+        // Only an install folder whose main app carries the folder's name is
+        // treated as one unit; anything else is listed app by app, so a
+        // folder of yours is never removed as a whole.
         Folder::Package(apps)
     } else {
         Folder::Apps(apps)
@@ -196,15 +219,7 @@ fn classify(dir: &Path) -> Folder {
 
 /// The package's main app: the one named like the folder, else the largest.
 fn main_app(folder: &Path, apps: &[PathBuf]) -> PathBuf {
-    let norm = |s: &str| s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>();
-    let fname = norm(&folder.file_name().unwrap_or_default().to_string_lossy());
-    apps.iter()
-        .find(|a| {
-            let n = norm(&a.file_stem().unwrap_or_default().to_string_lossy());
-            !n.is_empty() && (fname.starts_with(&n) || n.starts_with(&fname))
-        })
-        .cloned()
-        .unwrap_or_else(|| apps.iter().max_by_key(|a| fsutil::size_of(a)).cloned().unwrap_or_default())
+    named_like(folder, apps).unwrap_or_else(|| apps.iter().max_by_key(|a| fsutil::size_of(a)).cloned().unwrap_or_default())
 }
 
 struct Bundle {
@@ -232,19 +247,34 @@ fn read_bundle(app: &Path) -> Bundle {
 fn discover() -> Vec<(PathBuf, Option<Vec<PathBuf>>)> {
     let mut out = Vec::new();
     for root in [PathBuf::from("/Applications"), fsutil::home().join("Applications")] {
-        for c in fsutil::children(&root) {
-            if is_app(&c) {
-                out.push((c, None));
-            } else if c.is_dir() {
-                match classify(&c) {
-                    Folder::Package(apps) => out.push((c, Some(apps))),
-                    Folder::Apps(apps) => out.extend(apps.into_iter().map(|a| (a, None))),
-                    Folder::None => {}
+        discover_in(&root, 0, &mut out);
+    }
+    out
+}
+
+fn discover_in(dir: &Path, depth: usize, out: &mut Vec<(PathBuf, Option<Vec<PathBuf>>)>) {
+    for c in fsutil::children(dir) {
+        if is_app(&c) {
+            out.push((c, None));
+        } else if c.is_dir() && !fsutil::is_symlink(&c) {
+            match classify(&c) {
+                Folder::Package(apps) => out.push((c, Some(apps))),
+                Folder::Apps(apps) => {
+                    out.extend(apps.into_iter().map(|a| (a, None)));
+                    // Shared folders like Utilities can hold install folders too.
+                    if depth == 0 {
+                        for sub in fsutil::children(&c).into_iter().filter(|p| p.is_dir() && !is_app(p)) {
+                            if let Folder::Package(apps) = classify(&sub) {
+                                out.push((sub, Some(apps)));
+                            }
+                        }
+                    }
                 }
+                Folder::None if depth == 0 => discover_in(&c, 1, out),
+                Folder::None => {}
             }
         }
     }
-    out
 }
 
 fn find_apps() -> Vec<AppInfo> {
@@ -888,12 +918,49 @@ mod tests {
     }
 
     #[test]
-    fn main_app_falls_back_to_the_largest() {
-        let d = tmp("largest").join("Vendor Suite");
+    fn folder_without_a_matching_main_app_is_listed_per_app() {
+        let d = tmp("nomatch").join("Vendor Suite");
         app(&d, "Helper", 1_000);
         app(&d, "Editor", 90_000);
         fs::write(d.join("README.txt"), b"x").unwrap();
-        let Folder::Package(apps) = classify(&d) else { panic!() };
-        assert_eq!(main_app(&d, &apps).file_stem().unwrap(), "Editor");
+        assert!(matches!(classify(&d), Folder::Apps(a) if a.len() == 2));
+    }
+
+    #[test]
+    fn utilities_is_never_one_package() {
+        let d = tmp("utils").join("Utilities");
+        app(&d, "Utilities Helper", 1_000);
+        app(&d, "Adobe Creative Cloud Cleaner Tool", 1_000);
+        fs::create_dir_all(d.join("Adobe Creative Cloud")).unwrap();
+        assert!(matches!(classify(&d), Folder::Apps(_)));
+    }
+
+    #[test]
+    fn your_folder_with_an_app_and_notes_is_not_removed_whole() {
+        let d = tmp("mine").join("My Stuff");
+        app(&d, "Some Game", 1_000);
+        fs::write(d.join("notes.txt"), b"x").unwrap();
+        assert!(matches!(classify(&d), Folder::Apps(_)));
+    }
+
+    #[test]
+    fn install_folders_inside_utilities_are_found() {
+        let root = tmp("nested");
+        let u = root.join("Utilities");
+        app(&u, "Disk Tool", 1_000);
+        let pkg = u.join("Acme Sync 2");
+        app(&pkg, "Acme Sync 2", 1_000);
+        fs::create_dir_all(pkg.join("lib")).unwrap();
+        let mut out = Vec::new();
+        discover_in(&root, 0, &mut out);
+        assert!(
+            out.iter()
+                .any(|(p, pk)| p.ends_with("Utilities/Disk Tool.app") && pk.is_none())
+        );
+        assert!(out.iter().any(|(p, pk)| p.ends_with("Acme Sync 2") && pk.is_some()));
+        assert!(
+            !out.iter().any(|(p, _)| p.ends_with("Utilities")),
+            "Utilities itself is never an entry"
+        );
     }
 }
