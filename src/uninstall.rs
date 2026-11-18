@@ -151,18 +151,45 @@ const LIB_DIRS: [(&str, &str, bool); 13] = [
     ("Application Scripts", "Scripts", false),
 ];
 
-/// One listing of ~/Library, shared by every app's leftover search.
-fn library_index() -> Vec<(PathBuf, String, &'static str, bool)> {
-    let lib = fsutil::home().join("Library");
-    LIB_DIRS
-        .iter()
-        .flat_map(|(dir, label, data)| {
-            fsutil::children(&lib.join(dir)).into_iter().map(move |p| {
-                let n = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-                (p, n, *label, *data)
+/// System-wide folders (in /Library, for all users). Items here are matched
+/// by bundle ID only, and removing them asks for your password.
+const SYS_DIRS: [(&str, &str, bool); 7] = [
+    ("Application Support", "App Support · all users", true),
+    ("Caches", "Cache · all users", false),
+    ("Preferences", "Preferences · all users", false),
+    ("Logs", "Logs · all users", false),
+    ("LaunchAgents", "Launch Agent · all users", false),
+    ("LaunchDaemons", "Background service", false),
+    ("PrivilegedHelperTools", "Helper tool", false),
+];
+
+struct LibItem {
+    path: PathBuf,
+    name: String,
+    kind: &'static str,
+    data: bool,
+    /// In /Library rather than ~/Library.
+    system: bool,
+}
+
+/// One listing of ~/Library and /Library, shared by every app's leftover search.
+fn library_index() -> Vec<LibItem> {
+    let list = |root: PathBuf, dirs: &'static [(&'static str, &'static str, bool)], system: bool| {
+        dirs.iter()
+            .flat_map(move |(dir, kind, data)| {
+                fsutil::children(&root.join(dir)).into_iter().map(move |p| LibItem {
+                    name: p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default(),
+                    path: p,
+                    kind,
+                    data: *data,
+                    system,
+                })
             })
-        })
-        .collect()
+            .collect::<Vec<_>>()
+    };
+    let mut v = list(fsutil::home().join("Library"), &LIB_DIRS, false);
+    v.extend(list(PathBuf::from("/Library"), &SYS_DIRS, true));
+    v
 }
 
 fn is_app(p: &Path) -> bool {
@@ -352,19 +379,24 @@ fn find_apps() -> Vec<AppInfo> {
             let bid = b.id.as_ref().map(|b| b.to_lowercase());
             let leftovers: Vec<Leftover> = index
                 .iter()
-                .filter(|(_, n, _, _)| {
+                .filter(|it| {
+                    let n = &it.name;
+                    let by_id = bid.as_ref().is_some_and(|b| belongs_to(n, b, &all_ids));
+                    if it.system {
+                        return by_id; // never guess by name outside your own Library
+                    }
                     let stem = Path::new(n)
                         .file_stem()
                         .map(|s| s.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    names.iter().any(|x| x == n || *x == stem) || bid.as_ref().is_some_and(|b| belongs_to(n, b, &all_ids))
+                    by_id || names.iter().any(|x| x == n || *x == stem)
                 })
-                .map(|(p, _, kind, data)| Leftover {
-                    path: p.clone(),
-                    size: fsutil::size_of(p),
-                    kind,
-                    user_data: *data,
-                    selected: !*data,
+                .map(|it| Leftover {
+                    path: it.path.clone(),
+                    size: fsutil::size_of(&it.path),
+                    kind: it.kind,
+                    user_data: it.data,
+                    selected: !it.data,
                 })
                 .collect();
 
@@ -531,6 +563,17 @@ fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
         }
         paths.push(a.path.clone());
         paths.extend(a.leftovers.iter().filter(|l| l.selected).map(|l| l.path.clone()));
+        // Stop the app's own background agents first, so they don't keep running.
+        let agents = fsutil::home().join("Library/LaunchAgents");
+        let uid = unsafe { libc::getuid() };
+        for l in a.leftovers.iter().filter(|l| l.selected && l.path.starts_with(&agents)) {
+            let _ = Command::new("launchctl")
+                .args(["bootout", &format!("gui/{uid}")])
+                .arg(&l.path)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
     }
     let mut err = fsutil::move_to_trash(&paths).err();
     // Count only what is really gone.
@@ -974,14 +1017,14 @@ impl Uninstaller {
                 );
             }
             if app.leftovers.is_empty() {
-                ui.label(theme::dim("No support files found in ~/Library.", 12.5));
+                ui.label(theme::dim("No support files found.", 12.5));
                 return;
             }
             {
                 for l in &mut self.apps[i].leftovers {
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut l.selected, "");
-                        ui.add_sized([96.0, 18.0], egui::Label::new(theme::dim(l.kind, 11.5)));
+                        ui.add_sized([118.0, 18.0], egui::Label::new(theme::dim(l.kind, 11.5)).truncate());
                         if l.user_data {
                             theme::badge(ui, "Your data", theme::WARN);
                         }
