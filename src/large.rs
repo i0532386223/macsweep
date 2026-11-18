@@ -434,70 +434,74 @@ impl Large {
         });
         ui.add_space(10.0);
 
-        egui::Panel::bottom("large_action").frame(egui::Frame::new()).show(ui, |ui| {
-            theme::centered(ui, |ui| {
-                ui.add_space(4.0);
-                let sel: u64 = self
-                    .files
-                    .iter()
-                    .filter(|f| self.selected.contains(&f.path))
-                    .map(|f| f.size)
-                    .sum();
-                let n = self.selected.len();
-                // Ticked files the current filter hides would otherwise be removed unseen.
-                let hidden = self
-                    .files
-                    .iter()
-                    .filter(|f| self.selected.contains(&f.path) && !self.visible(f))
-                    .count();
-                if n == 0 {
-                    self.confirm = false;
-                }
-                if self.confirm {
-                    let warn = (hidden > 0).then(|| {
-                        format!(
-                            "{} of them {} hidden by the current filter.",
-                            hidden,
-                            if hidden == 1 { "is" } else { "are" }
-                        )
-                    });
-                    match theme::confirm(
-                        ui,
-                        &format!("Move {} ({}) to the Trash?", theme::plural(n, "file"), fmt_size(sel)),
-                        if n == 1 {
-                            "You can put it back from the Trash until you empty it."
-                        } else {
-                            "You can put them back from the Trash until you empty it."
-                        },
-                        warn.as_deref(),
-                        &format!("{}  Move to Trash", icon::TRASH),
-                    ) {
-                        Some(true) => {
-                            self.confirm = false;
-                            let paths: Vec<PathBuf> = self.selected.iter().cloned().collect();
-                            self.trash = Some(Job::spawn(ctx, move |_, _| fsutil::move_to_trash(&paths)));
-                        }
-                        Some(false) => self.confirm = false,
-                        None => {}
+        egui::Panel::bottom("large_action")
+            .frame(theme::bottom_frame())
+            .show_separator_line(false)
+            .show(ui, |ui| {
+                theme::centered(ui, |ui| {
+                    ui.add_space(4.0);
+                    let sel: u64 = self
+                        .files
+                        .iter()
+                        .filter(|f| self.selected.contains(&f.path))
+                        .map(|f| f.size)
+                        .sum();
+                    let n = self.selected.len();
+                    // Ticked files the current filter hides would otherwise be removed unseen.
+                    let hidden = self
+                        .files
+                        .iter()
+                        .filter(|f| self.selected.contains(&f.path) && !self.visible(f))
+                        .count();
+                    if n == 0 {
+                        self.confirm = false;
                     }
-                    return;
-                }
-                if theme::round_button(ui, "Remove", p, n > 0).clicked() {
-                    self.confirm = true;
-                }
-                let mut msg = format!("{} · {} selected · moved to Trash", theme::plural(n, "file"), fmt_size(sel));
-                if hidden > 0 {
-                    msg.push_str(&format!(" · {hidden} not shown in this view"));
-                }
-                ui.label(theme::dim(msg, 12.5));
+                    if self.confirm {
+                        let warn = (hidden > 0).then(|| {
+                            format!(
+                                "{} of them {} hidden by the current filter.",
+                                hidden,
+                                if hidden == 1 { "is" } else { "are" }
+                            )
+                        });
+                        match theme::confirm(
+                            ui,
+                            &format!("Move {} ({}) to the Trash?", theme::plural(n, "file"), fmt_size(sel)),
+                            if n == 1 {
+                                "You can put it back from the Trash until you empty it."
+                            } else {
+                                "You can put them back from the Trash until you empty it."
+                            },
+                            warn.as_deref(),
+                            &format!("{}  Move to Trash", icon::TRASH),
+                        ) {
+                            Some(true) => {
+                                self.confirm = false;
+                                let paths: Vec<PathBuf> = self.selected.iter().cloned().collect();
+                                self.trash = Some(Job::spawn(ctx, move |_, _| fsutil::move_to_trash(&paths)));
+                            }
+                            Some(false) => self.confirm = false,
+                            None => {}
+                        }
+                        return;
+                    }
+                    if theme::round_button(ui, "Remove", p, n > 0).clicked() {
+                        self.confirm = true;
+                    }
+                    let mut msg = format!("{} · {} selected · moved to Trash", theme::plural(n, "file"), fmt_size(sel));
+                    if hidden > 0 {
+                        msg.push_str(&format!(" · {hidden} not shown in this view"));
+                    }
+                    ui.label(theme::dim(msg, 12.5));
+                });
             });
-        });
 
         // Kind filters
         egui::Panel::left("large_kinds")
             .resizable(false)
-            .exact_size((ui.available_width() * 0.32).clamp(240.0, 250.0))
-            .frame(egui::Frame::new())
+            .exact_size((ui.available_width() * 0.32).clamp(256.0, 300.0))
+            .frame(theme::side_frame())
+            .show_separator_line(false)
             .show(ui, |ui| {
                 let mut entry =
                     |ui: &mut Ui, k: Option<Kind>, label: &str, glyph: &str, color: Color32, size: u64, count: usize| {

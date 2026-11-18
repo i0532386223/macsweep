@@ -781,63 +781,66 @@ impl Uninstaller {
     }
 
     fn bottom(&mut self, ui: &mut Ui, p: Palette, ctx: &egui::Context) {
-        egui::Panel::bottom("apps_action").frame(egui::Frame::new()).show(ui, |ui| {
-            theme::centered(ui, |ui| {
-                ui.add_space(4.0);
-                let chosen: Vec<AppInfo> = self.apps.iter().filter(|a| a.checked).cloned().collect();
-                let size: u64 = chosen.iter().map(AppInfo::total).sum();
-                let n = chosen.len();
-                let key: Vec<(PathBuf, usize)> = chosen
-                    .iter()
-                    .map(|a| (a.path.clone(), a.leftovers.iter().filter(|l| l.selected).count()))
-                    .collect();
-                if self.confirm_for.as_ref().is_some_and(|k| *k != key) {
-                    self.confirm_for = None;
-                }
-                if self.confirm_for.is_some() {
-                    let names: Vec<&str> = chosen.iter().map(|a| a.name.as_str()).collect();
-                    let list = match names.len() {
-                        0..=3 => names.join(", "),
-                        k => format!("{} and {} more", names[..3].join(", "), k - 3),
-                    };
-                    let with_data: Vec<&str> = chosen
+        egui::Panel::bottom("apps_action")
+            .frame(theme::bottom_frame())
+            .show_separator_line(false)
+            .show(ui, |ui| {
+                theme::centered(ui, |ui| {
+                    ui.add_space(4.0);
+                    let chosen: Vec<AppInfo> = self.apps.iter().filter(|a| a.checked).cloned().collect();
+                    let size: u64 = chosen.iter().map(AppInfo::total).sum();
+                    let n = chosen.len();
+                    let key: Vec<(PathBuf, usize)> = chosen
                         .iter()
-                        .filter(|a| a.leftovers.iter().any(|l| l.selected && l.user_data))
-                        .map(|a| a.name.as_str())
+                        .map(|a| (a.path.clone(), a.leftovers.iter().filter(|l| l.selected).count()))
                         .collect();
-                    let warn = (!with_data.is_empty()).then(|| {
-                        format!(
-                            "Your data for {} is ticked too (profiles, accounts, saved content).",
-                            with_data.join(", ")
-                        )
-                    });
-                    match theme::confirm(
-                        ui,
-                        &format!("Uninstall {} ({})?", theme::plural(n, "app"), fmt_size(size)),
-                        &format!("{list} will be quit and moved to the Trash with the ticked support files."),
-                        warn.as_deref(),
-                        &format!("{}  Uninstall", icon::TRASH),
-                    ) {
-                        Some(true) => {
-                            self.confirm_for = None;
-                            self.remove = Some(Job::spawn(ctx, move |_, _| uninstall(chosen)));
-                        }
-                        Some(false) => self.confirm_for = None,
-                        None => {}
+                    if self.confirm_for.as_ref().is_some_and(|k| *k != key) {
+                        self.confirm_for = None;
                     }
-                    return;
-                }
-                if theme::round_button(ui, "Uninstall", p, n > 0).clicked() {
-                    self.confirm_for = Some(key);
-                }
-                let msg = if n == 0 {
-                    "Tick the apps you want to remove".to_string()
-                } else {
-                    format!("{} selected · {} · moved to Trash", theme::plural(n, "app"), fmt_size(size))
-                };
-                ui.label(theme::dim(msg, 12.5));
+                    if self.confirm_for.is_some() {
+                        let names: Vec<&str> = chosen.iter().map(|a| a.name.as_str()).collect();
+                        let list = match names.len() {
+                            0..=3 => names.join(", "),
+                            k => format!("{} and {} more", names[..3].join(", "), k - 3),
+                        };
+                        let with_data: Vec<&str> = chosen
+                            .iter()
+                            .filter(|a| a.leftovers.iter().any(|l| l.selected && l.user_data))
+                            .map(|a| a.name.as_str())
+                            .collect();
+                        let warn = (!with_data.is_empty()).then(|| {
+                            format!(
+                                "Your data for {} is ticked too (profiles, accounts, saved content).",
+                                with_data.join(", ")
+                            )
+                        });
+                        match theme::confirm(
+                            ui,
+                            &format!("Uninstall {} ({})?", theme::plural(n, "app"), fmt_size(size)),
+                            &format!("{list} will be quit and moved to the Trash with the ticked support files."),
+                            warn.as_deref(),
+                            &format!("{}  Uninstall", icon::TRASH),
+                        ) {
+                            Some(true) => {
+                                self.confirm_for = None;
+                                self.remove = Some(Job::spawn(ctx, move |_, _| uninstall(chosen)));
+                            }
+                            Some(false) => self.confirm_for = None,
+                            None => {}
+                        }
+                        return;
+                    }
+                    if theme::round_button(ui, "Uninstall", p, n > 0).clicked() {
+                        self.confirm_for = Some(key);
+                    }
+                    let msg = if n == 0 {
+                        "Tick the apps you want to remove".to_string()
+                    } else {
+                        format!("{} selected · {} · moved to Trash", theme::plural(n, "app"), fmt_size(size))
+                    };
+                    ui.label(theme::dim(msg, 12.5));
+                });
             });
-        });
     }
 
     fn list(&mut self, ui: &mut Ui, ctx: &egui::Context) {
@@ -851,8 +854,9 @@ impl Uninstaller {
 
         egui::Panel::left("apps_list")
             .resizable(false)
-            .exact_size((ui.available_width() * 0.45).clamp(240.0, 400.0))
-            .frame(egui::Frame::new())
+            .exact_size((ui.available_width() * 0.45).clamp(256.0, 416.0))
+            .frame(theme::side_frame())
+            .show_separator_line(false)
             .show(ui, |ui| {
                 let row_h = 50.0;
                 egui::ScrollArea::vertical()
@@ -1024,7 +1028,14 @@ impl Uninstaller {
                 for l in &mut self.apps[i].leftovers {
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut l.selected, "");
-                        ui.add_sized([118.0, 18.0], egui::Label::new(theme::dim(l.kind, 11.5)).truncate());
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(118.0, 18.0),
+                            Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.set_width(118.0);
+                                ui.add(egui::Label::new(theme::dim(l.kind, 11.5)).truncate());
+                            },
+                        );
                         if l.user_data {
                             theme::badge(ui, "Your data", theme::WARN);
                         }

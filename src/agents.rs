@@ -128,7 +128,7 @@ impl Agents {
         });
         ui.add_space(10.0);
 
-        egui::Panel::bottom("agents_action").frame(egui::Frame::new()).show(ui, |ui| {
+        egui::Panel::bottom("agents_action").frame(theme::bottom_frame()).show_separator_line(false).show(ui, |ui| {
             theme::centered(ui, |ui| {
                 ui.add_space(4.0);
                 let n = self.items.iter().filter(|i| i.selected).count();

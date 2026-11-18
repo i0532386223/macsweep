@@ -601,76 +601,80 @@ impl Dupes {
             return;
         }
 
-        egui::Panel::bottom("dupes_action").frame(egui::Frame::new()).show(ui, |ui| {
-            theme::centered(ui, |ui| {
-                ui.add_space(4.0);
-                let n: usize = self.groups.iter().map(|g| g.files.iter().filter(|f| f.remove).count()).sum();
-                let groups_n = self.groups.iter().filter(|g| g.files.iter().any(|f| f.remove)).count();
-                let bytes: u64 = self.groups.iter().map(DupGroup::selected_bytes).sum();
-                if n == 0 {
-                    self.confirm = false;
-                }
-                if self.confirm {
-                    let answer = theme::confirm(
-                        ui,
-                        &format!("Move {} ({}) to the Trash?", theme::plural(n, "file"), fmt_size(bytes)),
-                        &format!(
-                            "From {}. One copy of each file is kept, and you can put {} back from the Trash.",
-                            theme::plural(groups_n, "group"),
-                            if n == 1 { "it" } else { "them" }
-                        ),
-                        None,
-                        &format!("{}  Move {n} to Trash", icon::TRASH),
-                    );
-                    match answer {
-                        Some(true) => {
-                            self.confirm = false;
-                            let plan = self
-                                .groups
-                                .iter()
-                                .filter(|g| g.files.iter().any(|f| f.remove))
-                                .map(|g| {
-                                    let rm = g
-                                        .files
-                                        .iter()
-                                        .filter(|f| f.remove)
-                                        .map(|f| (f.path.clone(), f.modified))
-                                        .collect();
-                                    let kept = g.files.iter().filter(|f| !f.remove).map(|f| f.path.clone()).collect();
-                                    (g.size, rm, kept)
-                                })
-                                .collect();
-                            self.trash = Some(Job::spawn(ctx, move |_, _| remove(plan)));
+        egui::Panel::bottom("dupes_action")
+            .frame(theme::bottom_frame())
+            .show_separator_line(false)
+            .show(ui, |ui| {
+                theme::centered(ui, |ui| {
+                    ui.add_space(4.0);
+                    let n: usize = self.groups.iter().map(|g| g.files.iter().filter(|f| f.remove).count()).sum();
+                    let groups_n = self.groups.iter().filter(|g| g.files.iter().any(|f| f.remove)).count();
+                    let bytes: u64 = self.groups.iter().map(DupGroup::selected_bytes).sum();
+                    if n == 0 {
+                        self.confirm = false;
+                    }
+                    if self.confirm {
+                        let answer = theme::confirm(
+                            ui,
+                            &format!("Move {} ({}) to the Trash?", theme::plural(n, "file"), fmt_size(bytes)),
+                            &format!(
+                                "From {}. One copy of each file is kept, and you can put {} back from the Trash.",
+                                theme::plural(groups_n, "group"),
+                                if n == 1 { "it" } else { "them" }
+                            ),
+                            None,
+                            &format!("{}  Move {n} to Trash", icon::TRASH),
+                        );
+                        match answer {
+                            Some(true) => {
+                                self.confirm = false;
+                                let plan = self
+                                    .groups
+                                    .iter()
+                                    .filter(|g| g.files.iter().any(|f| f.remove))
+                                    .map(|g| {
+                                        let rm = g
+                                            .files
+                                            .iter()
+                                            .filter(|f| f.remove)
+                                            .map(|f| (f.path.clone(), f.modified))
+                                            .collect();
+                                        let kept = g.files.iter().filter(|f| !f.remove).map(|f| f.path.clone()).collect();
+                                        (g.size, rm, kept)
+                                    })
+                                    .collect();
+                                self.trash = Some(Job::spawn(ctx, move |_, _| remove(plan)));
+                            }
+                            Some(false) => self.confirm = false,
+                            None => {}
                         }
-                        Some(false) => self.confirm = false,
-                        None => {}
-                    }
-                } else {
-                    if theme::round_button(ui, "Remove", p, n > 0).clicked() {
-                        self.confirm = true;
-                    }
-                    let msg = if !self.note.is_empty() {
-                        self.note.clone()
-                    } else if n == 0 {
-                        "Nothing selected. Tick a group, a single copy, or \"Select all extra copies\".".to_string()
                     } else {
-                        format!(
-                            "{} from {} selected · {}",
-                            theme::plural(n, "file"),
-                            theme::plural(groups_n, "group"),
-                            fmt_size(bytes)
-                        )
-                    };
-                    ui.label(theme::dim(msg, 12.5));
-                }
+                        if theme::round_button(ui, "Remove", p, n > 0).clicked() {
+                            self.confirm = true;
+                        }
+                        let msg = if !self.note.is_empty() {
+                            self.note.clone()
+                        } else if n == 0 {
+                            "Nothing selected. Tick a group, a single copy, or \"Select all extra copies\".".to_string()
+                        } else {
+                            format!(
+                                "{} from {} selected · {}",
+                                theme::plural(n, "file"),
+                                theme::plural(groups_n, "group"),
+                                fmt_size(bytes)
+                            )
+                        };
+                        ui.label(theme::dim(msg, 12.5));
+                    }
+                });
             });
-        });
 
         // Group list
         egui::Panel::left("dupes_groups")
             .resizable(false)
-            .exact_size((ui.available_width() * 0.42).clamp(240.0, 360.0))
-            .frame(egui::Frame::new())
+            .exact_size((ui.available_width() * 0.42).clamp(256.0, 376.0))
+            .frame(theme::side_frame())
+            .show_separator_line(false)
             .show(ui, |ui| {
                 let row_h = 52.0;
                 egui::ScrollArea::vertical()
@@ -739,7 +743,8 @@ impl Dupes {
             ui.separator();
             let all_but_one = g.files.iter().filter(|f| f.remove).count() + 1 >= g.files.len();
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                for f in &mut g.files {
+                let last = g.files.len().saturating_sub(1);
+                for (fi, f) in g.files.iter_mut().enumerate() {
                     ui.horizontal(|ui| {
                         let was = f.remove;
                         if ui.checkbox(&mut f.remove, "").changed() {
@@ -786,7 +791,9 @@ impl Dupes {
                         }
                     });
                     ui.add_space(8.0);
-                    ui.separator();
+                    if fi < last {
+                        ui.separator();
+                    }
                 }
             });
         });

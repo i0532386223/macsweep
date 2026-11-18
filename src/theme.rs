@@ -185,6 +185,8 @@ pub fn setup(ctx: &egui::Context) {
         s.spacing.item_spacing = vec2(10.0, 8.0);
         s.spacing.button_padding = vec2(14.0, 6.0);
         s.spacing.interact_size.y = 26.0;
+        // Like a native app: clicking text doesn't start a text selection.
+        s.interaction.selectable_labels = false;
 
         let v = &mut s.visuals;
         *v = egui::Visuals::dark();
@@ -449,6 +451,9 @@ pub fn row(ui: &mut Ui, height: f32, selected: bool, add: impl FnOnce(&mut Ui)) 
         Color32::from_white_alpha(12)
     };
     ui.painter().rect_filled(rect, 12, fill);
+    if resp.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
     let inner = rect.shrink2(vec2(10.0, 0.0));
     ui.scope_builder(
         egui::UiBuilder::new()
@@ -539,4 +544,25 @@ pub fn confirm(ui: &mut Ui, title: &str, sub: &str, warn: Option<&str>, action: 
         out = Some(false);
     }
     out
+}
+
+/// Frame for a list panel on the left of a split view: a clear gap before
+/// the detail card, no divider line.
+pub fn side_frame() -> egui::Frame {
+    egui::Frame::new().inner_margin(egui::Margin {
+        left: 0,
+        right: 16,
+        top: 0,
+        bottom: 0,
+    })
+}
+
+/// Frame for the action area at the bottom of a screen.
+pub fn bottom_frame() -> egui::Frame {
+    egui::Frame::new().inner_margin(egui::Margin {
+        left: 0,
+        right: 0,
+        top: 10,
+        bottom: 0,
+    })
 }

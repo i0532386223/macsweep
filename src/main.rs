@@ -431,7 +431,8 @@ impl App {
                 theme::centered(ui, |ui| {
                     ui.add_space(12.0);
                     self.junk.clean_bar(ui, p, &ctx);
-                    if ui.link(theme::text("Review details", 13.5)).clicked() {
+                    ui.add_space(4.0);
+                    if theme::mini_button(ui, "Review details", "See every item and choose what to clean").clicked() {
                         self.go(Pane::Junk, now);
                     }
                 });

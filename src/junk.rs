@@ -387,31 +387,39 @@ impl Junk {
                     .color(Color32::from_rgb(0xb8, 0xf5, 0xd8)),
                 );
             });
-            ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                if theme::pill(
-                    ui,
-                    format!("{}  Scan again", icon::ARROW_CLOCKWISE),
-                    Color32::from_white_alpha(35),
-                )
-                .clicked()
-                {
-                    self.start_scan(ctx);
-                }
+            // Pinned to the same height as the other screens' header buttons.
+            ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
+                ui.with_layout(Layout::top_down(egui::Align::Max), |ui| {
+                    ui.add_space(11.0);
+                    if theme::pill(
+                        ui,
+                        format!("{}  Scan again", icon::ARROW_CLOCKWISE),
+                        Color32::from_white_alpha(35),
+                    )
+                    .clicked()
+                    {
+                        self.start_scan(ctx);
+                    }
+                });
             });
         });
         ui.add_space(10.0);
 
-        egui::Panel::bottom("junk_action").frame(egui::Frame::new()).show(ui, |ui| {
-            theme::centered(ui, |ui| {
-                ui.add_space(4.0);
-                self.clean_bar(ui, p, ctx);
+        egui::Panel::bottom("junk_action")
+            .frame(theme::bottom_frame())
+            .show_separator_line(false)
+            .show(ui, |ui| {
+                theme::centered(ui, |ui| {
+                    ui.add_space(4.0);
+                    self.clean_bar(ui, p, ctx);
+                });
             });
-        });
 
         egui::Panel::left("junk_cats")
             .resizable(false)
-            .exact_size((ui.available_width() * 0.40).clamp(240.0, 330.0))
-            .frame(egui::Frame::new())
+            .exact_size((ui.available_width() * 0.40).clamp(256.0, 346.0))
+            .frame(theme::side_frame())
+            .show_separator_line(false)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     for (i, c) in self.cats.iter_mut().enumerate() {
@@ -435,7 +443,11 @@ impl Junk {
                                 ui.label(theme::dim(sub, 11.5));
                             });
                             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                                ui.label(theme::semi(fmt_size(c.total()), 13.5));
+                                if c.items.is_empty() {
+                                    ui.label(theme::dim("—", 13.5));
+                                } else {
+                                    ui.label(theme::semi(fmt_size(c.total()), 13.5));
+                                }
                             });
                         });
                         if resp.clicked() {
