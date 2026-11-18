@@ -317,15 +317,19 @@ pub fn sh_quote(s: &str) -> String {
 /// Builds the shell script that moves items into the user's Trash and gives
 /// them back to the user, so the Trash can be emptied without a password.
 pub fn admin_trash_script(paths: &[PathBuf], trash_dir: &Path, user: &str, stamp: u64) -> String {
+    // Two items with the same name must not land on the same spot: `mv` would
+    // put the second one *inside* the first.
+    let mut used = std::collections::HashSet::new();
     paths
         .iter()
         .enumerate()
         .map(|(i, p)| {
             let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let mut dest = trash_dir.join(&name);
-            if lexists(&dest) {
+            if lexists(&dest) || used.contains(&dest) {
                 dest = trash_dir.join(format!("{name} {stamp}-{i}"));
             }
+            used.insert(dest.clone());
             format!(
                 "/bin/mv {src} {dst} && /usr/sbin/chown -hR {u} {dst}",
                 src = sh_quote(&p.to_string_lossy()),
@@ -508,6 +512,16 @@ mod tests {
             s,
             "/bin/mv '/Applications/Bob'\\''s \"Tool\" 1.0.app' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app' && /usr/sbin/chown -hR 'me' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app'"
         );
+    }
+
+    #[test]
+    fn same_named_items_get_different_trash_names() {
+        let t = PathBuf::from("/nonexistent-trash");
+        let a = PathBuf::from("/Applications/Foo.app");
+        let b = PathBuf::from("/Applications/Utilities/Foo.app");
+        let s = admin_trash_script(&[a, b], &t, "me", 7);
+        assert!(s.contains("'/nonexistent-trash/Foo.app'"));
+        assert!(s.contains("'/nonexistent-trash/Foo.app 7-1'"));
     }
 
     #[test]
