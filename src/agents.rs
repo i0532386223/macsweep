@@ -22,6 +22,7 @@ pub struct Agents {
     loaded: bool,
     remove: Option<Job<String>>,
     status: String,
+    confirm: bool,
 }
 
 fn parse(path: &Path, scope: &'static str, is_user: bool) -> Item {
@@ -62,7 +63,10 @@ fn remove(targets: Vec<(PathBuf, bool)>) -> String {
     }
     let paths: Vec<PathBuf> = targets.into_iter().map(|t| t.0).collect();
     match fsutil::move_to_trash(&paths) {
-        Ok(()) => format!("Removed {} item(s). System items stop after a restart.", paths.len()),
+        Ok(()) => format!(
+            "Removed {}. System items stop after a restart.",
+            crate::theme::plural(paths.len(), "item")
+        ),
         Err(e) => format!("Couldn't remove everything: {e}"),
     }
 }
@@ -128,21 +132,50 @@ impl Agents {
             theme::centered(ui, |ui| {
                 ui.add_space(4.0);
                 let n = self.items.iter().filter(|i| i.selected).count();
+                let in_use = self.items.iter().filter(|i| i.selected && !i.orphaned).count();
+                if n == 0 {
+                    self.confirm = false;
+                }
+                if self.confirm {
+                    let warn = (in_use > 0).then(|| {
+                        if in_use == 1 {
+                            "1 item belongs to an app that is still installed. Removing it can stop that app from updating or working.".to_string()
+                        } else {
+                            format!("{in_use} items belong to apps that are still installed. Removing them can stop those apps from updating or working.")
+                        }
+                    });
+                    match theme::confirm(
+                        ui,
+                        &format!("Remove {}?", theme::plural(n, "background item")),
+                        "They are stopped and moved to the Trash. System items stop after a restart.",
+                        warn.as_deref(),
+                        &format!("{}  Remove", icon::TRASH),
+                    ) {
+                        Some(true) => {
+                            self.confirm = false;
+                            let targets: Vec<_> = self
+                                .items
+                                .iter()
+                                .filter(|i| i.selected)
+                                .map(|i| (i.path.clone(), i.is_user))
+                                .collect();
+                            self.remove = Some(Job::spawn(&ctx, move |_, _| remove(targets)));
+                        }
+                        Some(false) => self.confirm = false,
+                        None => {}
+                    }
+                    return;
+                }
                 if theme::round_button(ui, "Remove", p, n > 0 && self.remove.is_none()).clicked() {
-                    let targets: Vec<_> = self
-                        .items
-                        .iter()
-                        .filter(|i| i.selected)
-                        .map(|i| (i.path.clone(), i.is_user))
-                        .collect();
-                    self.remove = Some(Job::spawn(&ctx, move |_, _| remove(targets)));
+                    self.confirm = true;
+                    self.status.clear();
                 }
                 let msg = if !self.status.is_empty() {
                     self.status.clone()
                 } else if n == 0 {
                     "Only remove items you recognise".into()
                 } else {
-                    format!("{n} selected · moved to Trash")
+                    format!("{} selected · moved to Trash", theme::plural(n, "item"))
                 };
                 ui.label(theme::dim(msg, 12.5));
             });
@@ -158,6 +191,7 @@ impl Agents {
                 });
                 return;
             }
+            let mut changed = false;
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 for it in &mut self.items {
                     egui::Frame::new()
@@ -167,7 +201,9 @@ impl Agents {
                         .show(ui, |ui| {
                             ui.set_width(ui.available_width());
                             ui.horizontal(|ui| {
-                                ui.checkbox(&mut it.selected, "");
+                                if ui.checkbox(&mut it.selected, "").changed() {
+                                    changed = true;
+                                }
                                 let (glyph, color) = if it.orphaned {
                                     (icon::GHOST, theme::WARN)
                                 } else {
@@ -196,6 +232,10 @@ impl Agents {
                     ui.add_space(4.0);
                 }
             });
+            if changed {
+                self.status.clear();
+                self.confirm = false;
+            }
         });
     }
 }
