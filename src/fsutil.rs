@@ -233,14 +233,89 @@ pub fn delete_permanently(items: &[(PathBuf, u64)]) -> (u64, usize) {
     (freed, failed)
 }
 
-/// Moves to the Trash via Finder (asks for a password for root-owned items).
+/// Moves items to the Trash.
+///
+/// Each item goes through Finder first, so "Put Back" works. Items Finder
+/// refuses (usually apps installed by a .pkg and owned by the system) are
+/// retried once with the standard macOS administrator password prompt.
+/// Returns Err with a readable message if anything is still left.
 pub fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
     if paths.is_empty() {
         return Ok(());
     }
-    let r = trash::delete_all(paths).map_err(|e| e.to_string());
+    let refused: Vec<PathBuf> = paths
+        .iter()
+        .filter(|p| p.exists() && trash::delete(p).is_err() && p.exists())
+        .cloned()
+        .collect();
+    let mut cancelled = false;
+    if !refused.is_empty() {
+        cancelled = !trash_with_admin(&refused);
+    }
     bump();
-    r
+    let left: Vec<String> = paths
+        .iter()
+        .filter(|p| p.exists())
+        .map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+        .collect();
+    if left.is_empty() {
+        Ok(())
+    } else if cancelled {
+        Err(format!("Cancelled. {} was not removed.", left.join(", ")))
+    } else {
+        Err(format!("Couldn't remove {}. macOS denied permission.", left.join(", ")))
+    }
+}
+
+/// Single-quotes a string for /bin/sh.
+pub fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Builds the shell script that moves items into the user's Trash and gives
+/// them back to the user, so the Trash can be emptied without a password.
+pub fn admin_trash_script(paths: &[PathBuf], trash_dir: &Path, user: &str, stamp: u64) -> String {
+    paths
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let mut dest = trash_dir.join(&name);
+            if dest.exists() {
+                dest = trash_dir.join(format!("{name} {stamp}-{i}"));
+            }
+            format!(
+                "/bin/mv {src} {dst} && /usr/sbin/chown -R {u} {dst}",
+                src = sh_quote(&p.to_string_lossy()),
+                dst = sh_quote(&dest.to_string_lossy()),
+                u = sh_quote(user),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+/// Runs the move with administrator rights (macOS shows its password prompt).
+/// Returns false if the user cancelled the prompt.
+fn trash_with_admin(paths: &[PathBuf]) -> bool {
+    let user = std::env::var("USER").unwrap_or_default();
+    if user.is_empty() {
+        return true;
+    }
+    let stamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let script = admin_trash_script(paths, &trash_dir(), &user, stamp);
+    let applescript = format!(
+        "do shell script \"{}\" with administrator privileges with prompt \"MacSweep needs your password to move these items to the Trash.\"",
+        script.replace('\\', "\\\\").replace('"', "\\\"")
+    );
+    match Command::new("osascript").args(["-e", &applescript]).output() {
+        // -128 is "User canceled" in AppleScript.
+        Ok(o) => !String::from_utf8_lossy(&o.stderr).contains("-128"),
+        Err(_) => true,
+    }
 }
 
 pub fn trash_dir() -> PathBuf {
@@ -335,6 +410,17 @@ mod tests {
         ] {
             assert!(!deletable(&h.join(p)), "{p} must be protected");
         }
+    }
+
+    #[test]
+    fn admin_script_quotes_awkward_names() {
+        let t = PathBuf::from("/Users/me/.Trash");
+        let p = PathBuf::from("/Applications/Bob's \"Tool\" 1.0.app");
+        let s = admin_trash_script(&[p], &t, "me", 7);
+        assert_eq!(
+            s,
+            "/bin/mv '/Applications/Bob'\\''s \"Tool\" 1.0.app' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app' && /usr/sbin/chown -R 'me' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app'"
+        );
     }
 
     #[test]

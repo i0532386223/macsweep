@@ -320,7 +320,7 @@ fn find_duplicates(
 /// unchanged since the scan and that at least one copy in its group remains.
 fn remove(plan: Vec<(u64, Vec<(PathBuf, Option<SystemTime>)>, Vec<PathBuf>)>) -> (usize, u64, Option<String>) {
     let mut paths = Vec::new();
-    let mut freed = 0;
+    let mut sizes = Vec::new();
     let mut skipped = 0;
     for (size, to_remove, kept) in plan {
         let keeper_ok = kept
@@ -333,15 +333,23 @@ fn remove(plan: Vec<(u64, Vec<(PathBuf, Option<SystemTime>)>, Vec<PathBuf>)>) ->
         for (p, modified) in to_remove {
             match std::fs::metadata(&p) {
                 Ok(m) if m.len() == size && m.modified().ok() == modified => {
+                    sizes.push(size);
                     paths.push(p);
-                    freed += size;
                 }
                 _ => skipped += 1,
             }
         }
     }
-    let n = paths.len();
     let mut err = fsutil::move_to_trash(&paths).err();
+    // Count only what is really gone.
+    let gone: Vec<u64> = paths
+        .iter()
+        .zip(&sizes)
+        .filter(|(p, _)| !p.exists())
+        .map(|(_, s)| *s)
+        .collect();
+    let n = gone.len();
+    let freed: u64 = gone.iter().sum();
     if skipped > 0 && err.is_none() {
         err = Some(format!("{skipped} file(s) changed since the scan and were left alone."));
     }

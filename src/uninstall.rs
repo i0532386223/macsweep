@@ -426,10 +426,12 @@ fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
         }
         paths.push(a.path.clone());
         paths.extend(a.leftovers.iter().filter(|l| l.selected).map(|l| l.path.clone()));
-        freed += a.total();
     }
-    let n = apps.len() - still_running.len();
     let mut err = fsutil::move_to_trash(&paths).err();
+    // Count only what is really gone.
+    let removed: Vec<&AppInfo> = apps.iter().filter(|a| !a.path.exists()).collect();
+    let n = removed.len();
+    freed = removed.iter().map(|a| a.total()).sum();
     if !still_running.is_empty() {
         err = Some(format!(
             "{} is still running — quit it and try again.",
@@ -537,12 +539,12 @@ impl Uninstaller {
             let sub = err
                 .clone()
                 .unwrap_or_else(|| "Empty the Trash (bottom-left) to get the space back.".into());
-            if done_screen(
-                ui,
-                p,
-                &format!("{n} app{} removed · {}", if *n == 1 { "" } else { "s" }, fmt_size(*freed)),
-                &sub,
-            ) {
+            let title = if *n == 0 {
+                "Nothing was removed".to_string()
+            } else {
+                format!("{n} app{} removed · {}", if *n == 1 { "" } else { "s" }, fmt_size(*freed))
+            };
+            if done_screen(ui, p, &title, &sub) {
                 self.done = None;
             }
             return;
