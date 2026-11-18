@@ -219,11 +219,10 @@ pub fn delete_permanently(items: &[(PathBuf, u64)]) -> (u64, usize) {
             failed += 1;
             continue;
         }
-        let res = match fs::symlink_metadata(p) {
-            Ok(md) if md.is_dir() => fs::remove_dir_all(p),
-            Ok(_) => fs::remove_file(p),
-            Err(e) => Err(e),
-        };
+        let mut res = remove_any(p);
+        if res.is_err() && p.starts_with(trash_dir()) {
+            res = unlock_and_remove(p);
+        }
         match res {
             Ok(()) => freed += size,
             Err(_) => failed += 1,
@@ -365,20 +364,55 @@ pub fn trash_dir() -> PathBuf {
     home().join(".Trash")
 }
 
-pub fn trash_size() -> u64 {
-    size_of(&trash_dir())
+/// Every Trash Finder shows as one: yours, plus the one on each external drive.
+pub fn trash_dirs() -> Vec<PathBuf> {
+    let mut v = vec![trash_dir()];
+    let uid = unsafe { libc::getuid() };
+    for vol in children(Path::new("/Volumes")) {
+        if is_symlink(&vol) {
+            continue; // the startup disk appears here as a link to "/"
+        }
+        let t = vol.join(".Trashes").join(uid.to_string());
+        if t.is_dir() {
+            v.push(t);
+        }
+    }
+    v
 }
 
-/// Permanently deletes everything in ~/.Trash. Returns (freed, failed).
+pub fn trash_size() -> u64 {
+    trash_dirs().iter().map(|d| size_of(d)).sum()
+}
+
+fn remove_any(p: &Path) -> std::io::Result<()> {
+    match fs::symlink_metadata(p) {
+        Ok(md) if md.is_dir() => fs::remove_dir_all(p),
+        Ok(_) => fs::remove_file(p),
+        Err(e) => Err(e),
+    }
+}
+
+/// Files marked "Locked" in Finder can't be deleted until unlocked.
+fn unlock_and_remove(p: &Path) -> std::io::Result<()> {
+    let _ = Command::new("chflags").arg("-R").arg("nouchg").arg(p).status();
+    remove_any(p)
+}
+
+/// Permanently deletes everything in every Trash. Returns (freed, failed).
 pub fn empty_trash() -> (u64, usize) {
-    let items: Vec<(PathBuf, u64)> = children(&trash_dir())
-        .into_iter()
-        .map(|p| {
-            let s = size_of(&p);
-            (p, s)
-        })
-        .collect();
-    delete_permanently(&items)
+    let (mut freed, mut failed) = (0u64, 0usize);
+    for dir in trash_dirs() {
+        for p in children(&dir) {
+            let size = size_of(&p);
+            if remove_any(&p).is_err() && unlock_and_remove(&p).is_err() && lexists(&p) {
+                failed += 1;
+            } else {
+                freed += size;
+            }
+        }
+    }
+    bump();
+    (freed, failed)
 }
 
 /// (total, available) bytes of the startup volume.

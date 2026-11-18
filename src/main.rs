@@ -65,6 +65,8 @@ struct Sys {
     trash_job: Option<Job<u64>>,
     empty_job: Option<Job<(u64, usize)>>,
     confirm_empty_until: f64,
+    /// Result of the last Empty Trash, shown under the Trash row for a while.
+    empty_note: Option<(String, f64)>,
 }
 
 impl Sys {
@@ -78,6 +80,7 @@ impl Sys {
             trash_job: None,
             empty_job: None,
             confirm_empty_until: 0.0,
+            empty_note: None,
         }
     }
 
@@ -100,8 +103,18 @@ impl Sys {
         if let Some(t) = job::poll(&mut self.trash_job, ctx) {
             self.trash = Some(t);
         }
-        if job::poll(&mut self.empty_job, ctx).is_some() {
+        if let Some((freed, failed)) = job::poll(&mut self.empty_job, ctx) {
             self.disk = fsutil::disk_info();
+            let msg = if failed > 0 {
+                format!(
+                    "{} couldn't be deleted. {} may be in use; try again after quitting apps.",
+                    theme::plural(failed, "item"),
+                    if failed == 1 { "It" } else { "They" }
+                )
+            } else {
+                format!("Emptied · {} freed", fsutil::fmt_size(freed))
+            };
+            self.empty_note = Some((msg, now + if failed > 0 { 12.0 } else { 5.0 }));
         }
     }
 }
@@ -299,6 +312,12 @@ impl App {
                         }
                     });
                 });
+                if let Some((msg, until)) = &self.sys.empty_note {
+                    if now < *until {
+                        ui.label(theme::dim(msg, 11.0));
+                        ctx.request_repaint_after(std::time::Duration::from_secs_f64(until - now));
+                    }
+                }
             });
     }
 
