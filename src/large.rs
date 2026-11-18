@@ -116,6 +116,7 @@ pub struct Large {
     scan: Option<Job<Vec<LargeFile>>>,
     trash: Option<Job<Result<(), String>>>,
     done: Option<(usize, u64, Option<String>)>,
+    confirm: bool,
 }
 
 impl Default for Large {
@@ -131,6 +132,7 @@ impl Default for Large {
             scan: None,
             trash: None,
             done: None,
+            confirm: false,
         }
     }
 }
@@ -215,6 +217,7 @@ impl Large {
     fn start(&mut self, ctx: &egui::Context) {
         self.selected.clear();
         self.done = None;
+        self.confirm = false;
         let min = self.min_mb * 1_000_000;
         self.scan = Some(Job::spawn(ctx, move |p, c| walk(min, p, c)));
     }
@@ -352,14 +355,53 @@ impl Large {
                     .filter(|f| self.selected.contains(&f.path))
                     .map(|f| f.size)
                     .sum();
-                if theme::round_button(ui, "Remove", p, !self.selected.is_empty()).clicked() {
-                    let paths: Vec<PathBuf> = self.selected.iter().cloned().collect();
-                    self.trash = Some(Job::spawn(ctx, move |_, _| fsutil::move_to_trash(&paths)));
+                let n = self.selected.len();
+                // Ticked files the current filter hides would otherwise be removed unseen.
+                let hidden = self
+                    .files
+                    .iter()
+                    .filter(|f| self.selected.contains(&f.path) && !self.visible(f))
+                    .count();
+                if n == 0 {
+                    self.confirm = false;
                 }
-                ui.label(theme::dim(
-                    format!("{} files · {} selected · moved to Trash", self.selected.len(), fmt_size(sel)),
-                    12.5,
-                ));
+                if self.confirm {
+                    let warn = (hidden > 0).then(|| {
+                        format!(
+                            "{} of them {} hidden by the current filter.",
+                            hidden,
+                            if hidden == 1 { "is" } else { "are" }
+                        )
+                    });
+                    match theme::confirm(
+                        ui,
+                        &format!("Move {} ({}) to the Trash?", theme::plural(n, "file"), fmt_size(sel)),
+                        if n == 1 {
+                            "You can put it back from the Trash until you empty it."
+                        } else {
+                            "You can put them back from the Trash until you empty it."
+                        },
+                        warn.as_deref(),
+                        &format!("{}  Move to Trash", icon::TRASH),
+                    ) {
+                        Some(true) => {
+                            self.confirm = false;
+                            let paths: Vec<PathBuf> = self.selected.iter().cloned().collect();
+                            self.trash = Some(Job::spawn(ctx, move |_, _| fsutil::move_to_trash(&paths)));
+                        }
+                        Some(false) => self.confirm = false,
+                        None => {}
+                    }
+                    return;
+                }
+                if theme::round_button(ui, "Remove", p, n > 0).clicked() {
+                    self.confirm = true;
+                }
+                let mut msg = format!("{} · {} selected · moved to Trash", theme::plural(n, "file"), fmt_size(sel));
+                if hidden > 0 {
+                    msg.push_str(&format!(" · {hidden} not shown in this view"));
+                }
+                ui.label(theme::dim(msg, 12.5));
             });
         });
 
@@ -447,6 +489,7 @@ impl Large {
                             ui.set_height(row_h);
                             let mut on = self.selected.contains(&f.path);
                             if ui.checkbox(&mut on, "").changed() {
+                                self.confirm = false;
                                 if on {
                                     self.selected.insert(f.path.clone());
                                 } else {
