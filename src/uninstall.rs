@@ -808,7 +808,7 @@ impl Uninstaller {
 
         egui::Panel::left("apps_list")
             .resizable(false)
-            .exact_size(400.0)
+            .exact_size((ui.available_width() * 0.45).clamp(240.0, 400.0))
             .frame(egui::Frame::new())
             .show(ui, |ui| {
                 let row_h = 50.0;
@@ -876,6 +876,8 @@ impl Uninstaller {
 
         theme::card(ui, |ui| {
             ui.set_min_size(ui.available_size());
+            // One scroll for the whole panel, so nothing spills out on small windows.
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             ui.horizontal(|ui| {
                 self.app_icon(ui, &app, 72.0);
                 ui.vertical(|ui| {
@@ -904,32 +906,35 @@ impl Uninstaller {
             });
             ui.add_space(8.0);
             egui::Grid::new("app_info")
-                .num_columns(4)
+                .num_columns(2)
                 .spacing([16.0, 6.0])
-                .min_col_width(60.0)
+                .min_col_width(90.0)
                 .show(ui, |ui| {
                     let cell = |ui: &mut Ui, k: &str, v: String| {
                         ui.label(theme::dim(k, 12.5));
-                        ui.label(theme::text(v, 13.0));
+                        ui.add(egui::Label::new(theme::text(v, 13.0)).truncate());
+                        ui.end_row();
                     };
                     cell(ui, "App", fmt_size(app.size));
-                    cell(ui, "Last opened", opened);
-                    ui.end_row();
                     cell(
                         ui,
                         "Support files",
                         format!(
-                            "{} · {} items",
+                            "{} · {}",
                             fmt_size(app.leftovers.iter().map(|l| l.size).sum()),
-                            app.leftovers.len()
+                            theme::plural(app.leftovers.len(), "item")
                         ),
                     );
-                    cell(ui, "Bundle ID", app.bundle_id.clone().unwrap_or_else(|| "—".into()));
-                    ui.end_row();
                     cell(ui, "Will remove", fmt_size(app.total()));
+                    cell(ui, "Last opened", opened);
+                    cell(ui, "Bundle ID", app.bundle_id.clone().unwrap_or_else(|| "—".into()));
                     ui.label(theme::dim("Location", 12.5));
                     if ui
-                        .link(theme::text(fsutil::pretty(&app.path), 13.0))
+                        .add(
+                            egui::Label::new(theme::text(fsutil::pretty(&app.path), 13.0).underline())
+                                .truncate()
+                                .sense(egui::Sense::click()),
+                        )
                         .on_hover_text("Reveal in Finder")
                         .clicked()
                     {
@@ -972,7 +977,7 @@ impl Uninstaller {
                 ui.label(theme::dim("No support files found in ~/Library.", 12.5));
                 return;
             }
-            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+            {
                 for l in &mut self.apps[i].leftovers {
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut l.selected, "");
@@ -996,6 +1001,7 @@ impl Uninstaller {
                         });
                     });
                 }
+            }
             });
         });
     }

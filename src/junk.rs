@@ -404,7 +404,7 @@ impl Junk {
 
         egui::Panel::left("junk_cats")
             .resizable(false)
-            .exact_size(330.0)
+            .exact_size((ui.available_width() * 0.40).clamp(240.0, 330.0))
             .frame(egui::Frame::new())
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {

@@ -408,7 +408,7 @@ impl Large {
         // Kind filters
         egui::Panel::left("large_kinds")
             .resizable(false)
-            .exact_size(250.0)
+            .exact_size((ui.available_width() * 0.32).clamp(240.0, 250.0))
             .frame(egui::Frame::new())
             .show(ui, |ui| {
                 let mut entry =

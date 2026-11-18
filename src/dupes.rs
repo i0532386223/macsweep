@@ -518,30 +518,44 @@ impl Dupes {
                 {
                     self.start(ctx);
                 }
-                let any = self.groups.iter().any(|g| g.files.iter().any(|f| f.remove));
-                if any && theme::pill(ui, "Clear selection", Color32::from_white_alpha(18)).clicked() {
-                    self.groups.iter_mut().for_each(Self::clear_group);
-                    self.confirm = false;
-                }
+            });
+        });
+        ui.add_space(6.0);
+
+        // Selection tools on their own row so they never crowd the title.
+        if !self.groups.is_empty() {
+            ui.horizontal(|ui| {
                 if theme::pill(ui, "Select all extra copies", Color32::from_white_alpha(35)).clicked() {
                     let keep = self.keep;
                     self.groups.iter_mut().for_each(|g| Self::select_group(g, keep));
                     self.confirm = false;
                 }
-                for (label, k) in [("Keep newest", Keep::Newest), ("Keep oldest", Keep::Oldest)] {
-                    let fill = if self.keep == k {
-                        Color32::from_white_alpha(70)
-                    } else {
-                        Color32::from_white_alpha(18)
-                    };
-                    if theme::pill(ui, label, fill).clicked() {
-                        self.keep = k;
-                        self.apply_keep();
-                    }
+                let any = self.groups.iter().any(|g| g.files.iter().any(|f| f.remove));
+                if any && theme::pill(ui, "Clear selection", Color32::from_white_alpha(18)).clicked() {
+                    self.groups.iter_mut().for_each(Self::clear_group);
+                    self.confirm = false;
                 }
+                ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+                    for (label, k) in [("Newest", Keep::Newest), ("Oldest", Keep::Oldest)] {
+                        let fill = if self.keep == k {
+                            Color32::from_white_alpha(70)
+                        } else {
+                            Color32::from_white_alpha(18)
+                        };
+                        if theme::pill(ui, label, fill)
+                            .on_hover_text("Which copy stays when you tick a whole group")
+                            .clicked()
+                        {
+                            self.keep = k;
+                            self.apply_keep();
+                            self.confirm = false;
+                        }
+                    }
+                    ui.label(theme::dim("Keep the", 12.5));
+                });
             });
-        });
-        ui.add_space(10.0);
+            ui.add_space(8.0);
+        }
 
         if self.groups.is_empty() {
             theme::centered(ui, |ui| {
@@ -563,29 +577,19 @@ impl Dupes {
                     self.confirm = false;
                 }
                 if self.confirm {
-                    ui.add_space(18.0);
-                    ui.label(theme::bold(
-                        format!(
-                            "Move {n} file{} ({}) to the Trash?",
-                            if n == 1 { "" } else { "s" },
-                            fmt_size(bytes)
+                    let answer = theme::confirm(
+                        ui,
+                        &format!("Move {} ({}) to the Trash?", theme::plural(n, "file"), fmt_size(bytes)),
+                        &format!(
+                            "From {}. One copy of each file is kept, and you can put {} back from the Trash.",
+                            theme::plural(groups_n, "group"),
+                            if n == 1 { "it" } else { "them" }
                         ),
-                        20.0,
-                    ));
-                    ui.label(theme::dim(
-                        format!(
-                            "From {groups_n} group{}. One copy of each file is kept.",
-                            if groups_n == 1 { "" } else { "s" }
-                        ),
-                        13.0,
-                    ));
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        ui.add_space((ui.available_width() - 300.0) / 2.0);
-                        if theme::pill(ui, "Cancel", Color32::from_white_alpha(35)).clicked() {
-                            self.confirm = false;
-                        }
-                        if theme::pill(ui, format!("{}  Move {n} to Trash", icon::TRASH), theme::DANGER).clicked() {
+                        None,
+                        &format!("{}  Move {n} to Trash", icon::TRASH),
+                    );
+                    match answer {
+                        Some(true) => {
                             self.confirm = false;
                             let plan = self
                                 .groups
@@ -604,8 +608,9 @@ impl Dupes {
                                 .collect();
                             self.trash = Some(Job::spawn(ctx, move |_, _| remove(plan)));
                         }
-                    });
-                    ui.add_space(18.0);
+                        Some(false) => self.confirm = false,
+                        None => {}
+                    }
                 } else {
                     if theme::round_button(ui, "Remove", p, n > 0).clicked() {
                         self.confirm = true;
@@ -616,9 +621,9 @@ impl Dupes {
                         "Nothing selected. Tick a group, a single copy, or \"Select all extra copies\".".to_string()
                     } else {
                         format!(
-                            "{n} file{} from {groups_n} group{} selected · {}",
-                            if n == 1 { "" } else { "s" },
-                            if groups_n == 1 { "" } else { "s" },
+                            "{} from {} selected · {}",
+                            theme::plural(n, "file"),
+                            theme::plural(groups_n, "group"),
                             fmt_size(bytes)
                         )
                     };
@@ -630,7 +635,7 @@ impl Dupes {
         // Group list
         egui::Panel::left("dupes_groups")
             .resizable(false)
-            .exact_size(360.0)
+            .exact_size((ui.available_width() * 0.42).clamp(240.0, 360.0))
             .frame(egui::Frame::new())
             .show(ui, |ui| {
                 let row_h = 52.0;
@@ -679,6 +684,7 @@ impl Dupes {
         let focus = self.focus.min(self.groups.len() - 1);
         let g = &mut self.groups[focus];
         let mut blocked = false;
+        let mut changed = false;
         theme::card(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ui.horizontal(|ui| {
@@ -702,7 +708,9 @@ impl Dupes {
                 for f in &mut g.files {
                     ui.horizontal(|ui| {
                         let was = f.remove;
-                        ui.checkbox(&mut f.remove, "");
+                        if ui.checkbox(&mut f.remove, "").changed() {
+                            changed = true;
+                        }
                         if f.remove && !was && all_but_one {
                             f.remove = false; // would remove every copy
                             blocked = true;
@@ -750,6 +758,9 @@ impl Dupes {
         });
         if blocked {
             self.note = "At least one copy of each file is always kept.".into();
+        }
+        if changed {
+            self.confirm = false;
         }
     }
 }
