@@ -372,11 +372,7 @@ impl App {
                 }
                 theme::centered(ui, |ui| {
                     ui.add_space(12.0);
-                    let sel = self.junk.selected_total();
-                    if theme::round_button(ui, "Clean", p, sel > 0).clicked() {
-                        self.junk.start_clean(&ctx);
-                    }
-                    ui.label(theme::dim(format!("{} selected", fsutil::fmt_size(sel)), 12.5));
+                    self.junk.clean_bar(ui, p, &ctx);
                     if ui.link(theme::text("Review details", 13.5)).clicked() {
                         self.go(Pane::Junk, now);
                     }

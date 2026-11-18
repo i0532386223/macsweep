@@ -73,6 +73,7 @@ pub struct Junk {
     clean: Option<Job<(u64, usize)>>,
     pub stage: Stage,
     focus: usize,
+    confirm: bool,
 }
 
 impl Default for Junk {
@@ -145,6 +146,7 @@ impl Default for Junk {
             clean: None,
             stage: Stage::Intro,
             focus: 0,
+            confirm: false,
         }
     }
 }
@@ -163,10 +165,53 @@ impl Junk {
         self.cats.iter().map(Category::selected_total).sum()
     }
 
+    /// The Clean button, or — once clicked — the confirmation that replaces it.
+    /// Cleaning deletes permanently, so it always asks first.
+    pub fn clean_bar(&mut self, ui: &mut Ui, p: Palette, ctx: &egui::Context) {
+        let sel = self.selected_total();
+        let n: usize = self.cats.iter().map(|c| c.items.iter().filter(|i| i.selected).count()).sum();
+        if n == 0 {
+            self.confirm = false;
+        }
+        if self.confirm {
+            let trash = self
+                .cats
+                .iter()
+                .find(|c| c.roots.contains(&".Trash"))
+                .map_or(0, |c| c.items.iter().filter(|i| i.selected).count());
+            let warn = (trash > 0).then(|| {
+                format!(
+                    "Includes {} in your Trash. They can't be put back after this.",
+                    theme::plural(trash, "item")
+                )
+            });
+            match theme::confirm(
+                ui,
+                &format!("Delete {} ({}) for good?", theme::plural(n, "item"), fmt_size(sel)),
+                "Caches and logs are rebuilt by apps when needed. This can't be undone.",
+                warn.as_deref(),
+                &format!("{}  Clean {}", icon::BROOM, fmt_size(sel)),
+            ) {
+                Some(true) => {
+                    self.confirm = false;
+                    self.start_clean(ctx);
+                }
+                Some(false) => self.confirm = false,
+                None => {}
+            }
+            return;
+        }
+        if theme::round_button(ui, "Clean", p, sel > 0).clicked() {
+            self.confirm = true;
+        }
+        ui.label(theme::dim(format!("{} selected · removed permanently", fmt_size(sel)), 12.5));
+    }
+
     pub fn start_scan(&mut self, ctx: &egui::Context) {
         if self.is_busy() {
             return;
         }
+        self.confirm = false;
         let roots: Vec<_> = self.cats.iter().map(|c| c.roots).collect();
         self.scan = Some(Job::spawn(ctx, move |_, _| {
             let home = fsutil::home();
@@ -308,11 +353,7 @@ impl Junk {
         egui::Panel::bottom("junk_action").frame(egui::Frame::new()).show(ui, |ui| {
             theme::centered(ui, |ui| {
                 ui.add_space(4.0);
-                let sel = self.selected_total();
-                if theme::round_button(ui, "Clean", p, sel > 0).clicked() {
-                    self.start_clean(ctx);
-                }
-                ui.label(theme::dim(format!("{} selected · removed permanently", fmt_size(sel)), 12.5));
+                self.clean_bar(ui, p, ctx);
             });
         });
 
@@ -329,6 +370,7 @@ impl Junk {
                             let cb = egui::Checkbox::new(&mut on, "").indeterminate(state.is_none());
                             if ui.add_enabled(!c.items.is_empty(), cb).changed() {
                                 c.items.iter_mut().for_each(|it| it.selected = on);
+                                self.confirm = false;
                             }
                             theme::icon_tile(ui, c.glyph, c.color, 34.0);
                             ui.vertical(|ui| {
@@ -353,6 +395,7 @@ impl Junk {
                 });
             });
 
+        let mut changed = false;
         let c = &mut self.cats[self.focus];
         ui.add_space(0.0);
         theme::card(ui, |ui| {
@@ -384,7 +427,9 @@ impl Junk {
                     for it in &mut c.items[range] {
                         ui.horizontal(|ui| {
                             ui.set_height(row_h);
-                            ui.checkbox(&mut it.selected, "");
+                            if ui.checkbox(&mut it.selected, "").changed() {
+                                changed = true;
+                            }
                             let name = it
                                 .path
                                 .file_name()
@@ -408,6 +453,9 @@ impl Junk {
                     }
                 });
         });
+        if changed {
+            self.confirm = false;
+        }
     }
 }
 

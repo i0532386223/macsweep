@@ -463,3 +463,62 @@ pub fn row(ui: &mut Ui, height: f32, selected: bool, add: impl FnOnce(&mut Ui)) 
 pub fn centered(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
     ui.vertical_centered(add);
 }
+
+/// "1 file", "3 files".
+pub fn plural(n: usize, word: &str) -> String {
+    if n == 1 { format!("1 {word}") } else { format!("{n} {word}s") }
+}
+
+/// Lays out a row of pills centered in the available width.
+fn centered_pills(ui: &mut Ui, labels: &[(String, Color32)]) -> Option<usize> {
+    let font = semi_font(13.5);
+    let pad = ui.spacing().button_padding.x * 2.0;
+    let gap = ui.spacing().item_spacing.x;
+    let w: f32 = labels
+        .iter()
+        .map(|(l, _)| ui.painter().layout_no_wrap(l.clone(), font.clone(), Color32::WHITE).size().x + pad)
+        .sum::<f32>()
+        + gap * (labels.len().saturating_sub(1)) as f32;
+    let mut hit = None;
+    ui.horizontal(|ui| {
+        ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
+        for (i, (l, fill)) in labels.iter().enumerate() {
+            if pill(ui, l.clone(), *fill).clicked() {
+                hit = Some(i);
+            }
+        }
+    });
+    hit
+}
+
+/// A confirmation shown in place of an action button.
+/// Returns Some(true) when confirmed, Some(false) when cancelled.
+pub fn confirm(ui: &mut Ui, title: &str, sub: &str, warn: Option<&str>, action: &str) -> Option<bool> {
+    let mut out = None;
+    ui.vertical_centered(|ui| {
+        ui.add_space(14.0);
+        ui.label(bold(title, 20.0));
+        ui.label(dim(sub, 13.0));
+        if let Some(w) = warn {
+            ui.add_space(2.0);
+            ui.label(text(format!("{}  {w}", icon::WARNING), 13.0).color(WARN));
+        }
+        ui.add_space(10.0);
+        out = match centered_pills(
+            ui,
+            &[
+                ("Cancel".to_string(), Color32::from_white_alpha(35)),
+                (action.to_string(), DANGER),
+            ],
+        ) {
+            Some(0) => Some(false),
+            Some(_) => Some(true),
+            None => None,
+        };
+        ui.add_space(14.0);
+    });
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        out = Some(false);
+    }
+    out
+}
