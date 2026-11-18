@@ -244,21 +244,26 @@ pub fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
         return Ok(());
     }
     let tdir = trash_dir();
-    let refused: Vec<PathBuf> = paths
-        .iter()
-        .filter(|p| lexists(p))
-        .filter(|p| {
-            // A link (e.g. a leftover shortcut in /Applications) is moved
-            // itself; Finder would try to follow it to its target.
-            let failed = if is_symlink(p) {
-                move_into(p, &tdir).is_err()
-            } else {
-                trash::delete(p).is_err()
-            };
-            failed && lexists(p)
-        })
-        .cloned()
-        .collect();
+    let mut refused = Vec::new();
+    let (links, items): (Vec<PathBuf>, Vec<PathBuf>) = paths.iter().filter(|p| lexists(p)).cloned().partition(|p| is_symlink(p));
+    // A link (e.g. a leftover shortcut in /Applications) is moved itself;
+    // Finder would try to follow it to its target.
+    for l in links {
+        if move_into(&l, &tdir).is_err() && lexists(&l) {
+            refused.push(l);
+        }
+    }
+    // Finder plays its sound once per request, so send items in batches.
+    for chunk in items.chunks(200) {
+        if trash::delete_all(chunk).is_err() {
+            // Find which items Finder refused, one at a time.
+            for p in chunk.iter().filter(|p| lexists(p)) {
+                if trash::delete(p).is_err() && lexists(p) {
+                    refused.push(p.clone());
+                }
+            }
+        }
+    }
     let mut cancelled = false;
     if !refused.is_empty() {
         cancelled = !trash_with_admin(&refused);
