@@ -40,6 +40,12 @@ pub struct AppInfo {
     arch: Arch,
     app_store: bool,
     icon_file: Option<String>,
+    /// The .app bundle the icon and metadata come from (the main app of a package).
+    icon_app: PathBuf,
+    /// Bundle IDs to quit before removal (every app inside a package).
+    members: Vec<String>,
+    /// Number of apps inside, when this entry is an install folder.
+    package_apps: usize,
     leftovers: Vec<Leftover>,
     checked: bool,
 }
@@ -155,42 +161,127 @@ fn library_index() -> Vec<(PathBuf, String, &'static str, bool)> {
         .collect()
 }
 
-fn find_apps() -> Vec<AppInfo> {
-    let mut bundles = Vec::new();
+fn is_app(p: &Path) -> bool {
+    p.extension().is_some_and(|e| e == "app")
+}
+
+/// How a folder inside /Applications should be listed.
+#[derive(Debug, PartialEq)]
+enum Folder {
+    /// An install folder (app + its own libraries, helpers or resources),
+    /// e.g. "Cisco Packet Tracer 8.2.2". Listed and removed as one unit.
+    Package(Vec<PathBuf>),
+    /// A plain folder of separate apps (e.g. one the user made). Listed per app.
+    Apps(Vec<PathBuf>),
+    None,
+}
+
+fn classify(dir: &Path) -> Folder {
+    let entries: Vec<PathBuf> = fsutil::children(dir)
+        .into_iter()
+        .filter(|p| p.file_name().is_some_and(|n| !n.to_string_lossy().starts_with('.')))
+        .filter(|p| p.extension().is_none_or(|e| e != "localized"))
+        .collect();
+    let apps: Vec<PathBuf> = entries.iter().filter(|p| is_app(p)).cloned().collect();
+    if apps.is_empty() {
+        Folder::None
+    } else if entries.len() > apps.len() {
+        Folder::Package(apps)
+    } else {
+        Folder::Apps(apps)
+    }
+}
+
+/// The package's main app: the one named like the folder, else the largest.
+fn main_app(folder: &Path, apps: &[PathBuf]) -> PathBuf {
+    let norm = |s: &str| s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+    let fname = norm(&folder.file_name().unwrap_or_default().to_string_lossy());
+    apps.iter()
+        .find(|a| {
+            let n = norm(&a.file_stem().unwrap_or_default().to_string_lossy());
+            !n.is_empty() && (fname.starts_with(&n) || n.starts_with(&fname))
+        })
+        .cloned()
+        .unwrap_or_else(|| apps.iter().max_by_key(|a| fsutil::size_of(a)).cloned().unwrap_or_default())
+}
+
+struct Bundle {
+    id: Option<String>,
+    name: Option<String>,
+    exe: Option<String>,
+    version: Option<String>,
+    icon_file: Option<String>,
+}
+
+fn read_bundle(app: &Path) -> Bundle {
+    let real = std::fs::canonicalize(app).unwrap_or_else(|_| app.to_path_buf());
+    let info = plist::Value::from_file(real.join("Contents/Info.plist")).ok();
+    let d = info.as_ref().and_then(|v| v.as_dictionary());
+    Bundle {
+        id: d.and_then(|d| plist_str(d, "CFBundleIdentifier")),
+        name: d.and_then(|d| plist_str(d, "CFBundleName")),
+        exe: d.and_then(|d| plist_str(d, "CFBundleExecutable")),
+        version: d.and_then(|d| plist_str(d, "CFBundleShortVersionString")),
+        icon_file: d.and_then(|d| plist_str(d, "CFBundleIconFile")),
+    }
+}
+
+/// (entry path, apps inside if it is a package)
+fn discover() -> Vec<(PathBuf, Option<Vec<PathBuf>>)> {
+    let mut out = Vec::new();
     for root in [PathBuf::from("/Applications"), fsutil::home().join("Applications")] {
         for c in fsutil::children(&root) {
-            if c.extension().is_some_and(|e| e == "app") {
-                bundles.push(c);
+            if is_app(&c) {
+                out.push((c, None));
             } else if c.is_dir() {
-                bundles.extend(
-                    fsutil::children(&c)
-                        .into_iter()
-                        .filter(|p| p.extension().is_some_and(|e| e == "app")),
-                );
+                match classify(&c) {
+                    Folder::Package(apps) => out.push((c, Some(apps))),
+                    Folder::Apps(apps) => out.extend(apps.into_iter().map(|a| (a, None))),
+                    Folder::None => {}
+                }
             }
         }
     }
+    out
+}
+
+fn find_apps() -> Vec<AppInfo> {
     let index = library_index();
-    let mut apps: Vec<AppInfo> = bundles
+    let mut apps: Vec<AppInfo> = discover()
         .into_par_iter()
-        .filter_map(|path| {
-            let real = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-            let info = plist::Value::from_file(real.join("Contents/Info.plist")).ok();
-            let d = info.as_ref().and_then(|v| v.as_dictionary());
-            let bundle_id = d.and_then(|d| plist_str(d, "CFBundleIdentifier"));
-            if bundle_id.as_deref().is_some_and(|b| b.starts_with("com.apple.")) {
+        .filter_map(|(path, package)| {
+            let main = match &package {
+                Some(inner) => main_app(&path, inner),
+                None => path.clone(),
+            };
+            let real = std::fs::canonicalize(&main).unwrap_or_else(|_| main.clone());
+            let b = read_bundle(&main);
+            if b.id.as_deref().is_some_and(|b| b.starts_with("com.apple.")) {
                 return None; // never touch Apple's apps
             }
-            let name = path.file_stem()?.to_string_lossy().into_owned();
-            let bundle_name = d.and_then(|d| plist_str(d, "CFBundleName"));
-            let exe = d.and_then(|d| plist_str(d, "CFBundleExecutable"));
+            // A folder name like "Packet Tracer 8.2.2" has no extension to strip.
+            let name = if package.is_some() {
+                path.file_name()
+            } else {
+                path.file_stem()
+            }?
+            .to_string_lossy()
+            .into_owned();
+            let main_name = main.file_stem()?.to_string_lossy().into_owned();
+            let members: Vec<String> = match &package {
+                Some(inner) => inner.iter().filter_map(|a| read_bundle(a).id).collect(),
+                None => b.id.iter().cloned().collect(),
+            };
 
-            // Leftovers: match bundle ID or exact app name.
-            let mut names = vec![name.to_lowercase(), name.to_lowercase().replace(' ', "")];
-            if let Some(b) = &bundle_name {
-                names.push(b.to_lowercase());
+            // Leftovers: match the main app's bundle ID or exact name (and the folder name).
+            let mut names = vec![main_name.to_lowercase(), main_name.to_lowercase().replace(' ', "")];
+            if package.is_some() {
+                names.push(name.to_lowercase());
             }
-            let bid = bundle_id.as_ref().map(|b| b.to_lowercase());
+            if let Some(bn) = &b.name {
+                names.push(bn.to_lowercase());
+            }
+            let bid = b.id.as_ref().map(|b| b.to_lowercase());
             let leftovers: Vec<Leftover> = index
                 .iter()
                 .filter(|(_, n, _, _)| {
@@ -210,12 +301,19 @@ fn find_apps() -> Vec<AppInfo> {
                 .collect();
 
             Some(AppInfo {
-                version: d.and_then(|d| plist_str(d, "CFBundleShortVersionString")),
-                icon_file: d.and_then(|d| plist_str(d, "CFBundleIconFile")),
-                arch: detect_arch(&real, exe.as_deref()),
+                version: b.version,
+                icon_file: b.icon_file,
+                arch: detect_arch(&real, b.exe.as_deref()),
                 app_store: real.join("Contents/_MASReceipt").exists(),
-                size: fsutil::app_size(&path),
-                bundle_id,
+                size: if package.is_some() {
+                    fsutil::size_of(&path)
+                } else {
+                    fsutil::app_size(&path)
+                },
+                bundle_id: b.id,
+                package_apps: package.as_ref().map_or(0, Vec::len),
+                icon_app: main,
+                members,
                 name,
                 path,
                 leftovers,
@@ -314,15 +412,15 @@ fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
     let mut paths = Vec::new();
     let mut freed = 0;
     let mut still_running = Vec::new();
-    for a in &apps {
-        if let Some(bid) = &a.bundle_id {
+    'apps: for a in &apps {
+        for bid in &a.members {
             let running = format!("application id \"{bid}\" is running");
             if osascript(&running) == "true" {
                 osascript(&format!("tell application id \"{bid}\" to quit"));
                 std::thread::sleep(std::time::Duration::from_millis(1500));
                 if osascript(&running) == "true" {
                     still_running.push(a.name.clone());
-                    continue;
+                    continue 'apps;
                 }
             }
         }
@@ -393,16 +491,16 @@ impl Uninstaller {
             for a in &mut self.apps {
                 a.checked = checked.contains(&a.path);
             }
-            let need: Vec<(PathBuf, Option<String>)> = self
+            let need: Vec<(PathBuf, PathBuf, Option<String>)> = self
                 .apps
                 .iter()
                 .filter(|a| !self.icons.contains_key(&a.path))
-                .map(|a| (a.path.clone(), a.icon_file.clone()))
+                .map(|a| (a.path.clone(), a.icon_app.clone(), a.icon_file.clone()))
                 .collect();
             if !need.is_empty() {
                 self.icon_job = Some(Job::spawn(&ctx, move |_, _| {
                     need.into_par_iter()
-                        .filter_map(|(p, f)| load_icon(&p, f.as_deref()).map(|img| (p, img)))
+                        .filter_map(|(p, app, f)| load_icon(&app, f.as_deref()).map(|img| (p, img)))
                         .collect()
                 }));
             }
@@ -624,6 +722,13 @@ impl Uninstaller {
                         if app.app_store {
                             theme::badge(ui, "App Store", Color32::from_rgb(0x5a, 0xa8, 0xff));
                         }
+                        if app.package_apps > 0 {
+                            theme::badge(
+                                ui,
+                                &format!("Folder · {} apps inside", app.package_apps),
+                                Color32::from_rgb(0x8a, 0x5c, 0xe6),
+                            );
+                        }
                         arch_badge(ui, app.arch);
                     });
                 });
@@ -724,5 +829,59 @@ impl Uninstaller {
                 }
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("macsweep-apps-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn app(dir: &Path, name: &str, bytes: usize) {
+        let a = dir.join(format!("{name}.app/Contents/MacOS"));
+        fs::create_dir_all(&a).unwrap();
+        fs::write(a.join("bin"), vec![0u8; bytes]).unwrap();
+    }
+
+    #[test]
+    fn install_folder_with_helpers_is_one_package() {
+        let d = tmp("pkg").join("Cisco Packet Tracer 8.2.2");
+        app(&d, "Cisco Packet Tracer 8.2.2", 50_000);
+        app(&d, "Linguist", 1_000);
+        app(&d, "maintenancetool", 2_000);
+        fs::create_dir_all(d.join("lib")).unwrap();
+        match classify(&d) {
+            Folder::Package(apps) => {
+                assert_eq!(apps.len(), 3);
+                assert_eq!(main_app(&d, &apps).file_stem().unwrap(), "Cisco Packet Tracer 8.2.2");
+            }
+            other => panic!("expected a package, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn folder_of_separate_apps_lists_each_app() {
+        let d = tmp("plain").join("Games");
+        app(&d, "Chess Pro", 1_000);
+        app(&d, "Solitaire", 1_000);
+        fs::write(d.join(".DS_Store"), b"x").unwrap();
+        assert!(matches!(classify(&d), Folder::Apps(a) if a.len() == 2));
+    }
+
+    #[test]
+    fn main_app_falls_back_to_the_largest() {
+        let d = tmp("largest").join("Vendor Suite");
+        app(&d, "Helper", 1_000);
+        app(&d, "Editor", 90_000);
+        fs::write(d.join("README.txt"), b"x").unwrap();
+        let Folder::Package(apps) = classify(&d) else { panic!() };
+        assert_eq!(main_app(&d, &apps).file_stem().unwrap(), "Editor");
     }
 }
