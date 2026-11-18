@@ -128,7 +128,7 @@ Pull requests are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md). The o
 - [`trash`](https://crates.io/crates/trash) for Finder-compatible Trash, [`icns`](https://crates.io/crates/icns) for app icons, [`plist`](https://crates.io/crates/plist) for app metadata
 - San Francisco (the system font) is memory-mapped instead of bundled
 
-Releases are built by GitHub Actions: push a tag such as `v0.2.0` and a universal `.app` is attached to a new release.
+Releases are built by GitHub Actions: push a tag such as `v0.2.0` and a universal `.app` is attached to a new release, with notes taken from [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
