@@ -389,7 +389,6 @@ impl App {
                     &format!("You now have {free} available."),
                 ) {
                     self.junk.stage = junk::Stage::Results;
-                    self.junk.start_scan(&ctx);
                 }
             }
             junk::Stage::Results => {

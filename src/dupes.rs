@@ -130,6 +130,8 @@ pub struct Dupes {
     focus: usize,
     note: String,
     confirm: bool,
+    /// The last scan was stopped early, so the results are incomplete.
+    partial: bool,
     state: ScanState,
     scan: Option<Job<Vec<DupGroup>>>,
     trash: Option<Job<(usize, u64, Option<String>)>>,
@@ -144,6 +146,7 @@ impl Default for Dupes {
             min_kb: 1024,
             keep: Keep::Oldest,
             confirm: false,
+            partial: false,
             focus: 0,
             note: String::new(),
             state: ScanState {
@@ -390,6 +393,7 @@ impl Dupes {
         self.done = None;
         self.note.clear();
         self.confirm = false;
+        self.partial = false;
         self.focus = 0;
         let min = self.min_kb * 1024;
         let stage = self.state.stage.clone();
@@ -426,6 +430,7 @@ impl Dupes {
                 ui.add_space(14.0);
                 if theme::pill(ui, format!("{}  Stop", icon::STOP), Color32::from_white_alpha(40)).clicked() {
                     job.stop();
+                    self.partial = true;
                 }
             });
             return;
@@ -504,9 +509,22 @@ impl Dupes {
             ui.vertical(|ui| {
                 ui.label(theme::bold(fmt_size(wasted), 28.0));
                 ui.label(theme::dim(
-                    format!("taken up by {copies} extra copies in {} groups", self.groups.len()),
+                    format!(
+                        "taken up by {} in {}",
+                        theme::plural(copies, "extra copy").replace("copys", "copies"),
+                        theme::plural(self.groups.len(), "group")
+                    ),
                     13.5,
                 ));
+                if self.partial {
+                    ui.label(
+                        theme::text(
+                            format!("{}  Scan stopped early — results are incomplete", icon::WARNING),
+                            12.0,
+                        )
+                        .color(theme::WARN),
+                    );
+                }
             });
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 if theme::pill(
@@ -517,6 +535,14 @@ impl Dupes {
                 .clicked()
                 {
                     self.start(ctx);
+                }
+                if theme::pill(ui, "Change size", Color32::from_white_alpha(18))
+                    .on_hover_text("Pick a different minimum file size")
+                    .clicked()
+                {
+                    self.scanned = false;
+                    self.groups.clear();
+                    self.confirm = false;
                 }
             });
         });

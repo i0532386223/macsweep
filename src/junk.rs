@@ -356,8 +356,9 @@ impl Junk {
                 } else {
                     "Your Mac is a little lighter now.".into()
                 };
+                // Back to the (now smaller) list; "Scan again" is there if wanted.
                 if done_screen(ui, p, &format!("{} cleaned", fmt_size(freed)), &note) {
-                    self.start_scan(&ctx);
+                    self.stage = Stage::Results;
                 }
             }
             Stage::Results => self.results(ui, p, &ctx),

@@ -117,6 +117,8 @@ pub struct Large {
     trash: Option<Job<Result<(), String>>>,
     done: Option<(usize, u64, Option<String>)>,
     confirm: bool,
+    /// The last scan was stopped early, so the results are incomplete.
+    partial: bool,
 }
 
 impl Default for Large {
@@ -133,6 +135,7 @@ impl Default for Large {
             trash: None,
             done: None,
             confirm: false,
+            partial: false,
         }
     }
 }
@@ -218,6 +221,7 @@ impl Large {
         self.selected.clear();
         self.done = None;
         self.confirm = false;
+        self.partial = false;
         let min = self.min_mb * 1_000_000;
         self.scan = Some(Job::spawn(ctx, move |p, c| walk(min, p, c)));
     }
@@ -253,6 +257,7 @@ impl Large {
                 ui.add_space(14.0);
                 if theme::pill(ui, format!("{}  Stop", icon::STOP), Color32::from_white_alpha(40)).clicked() {
                     job.stop();
+                    self.partial = true;
                 }
             });
             return;
@@ -327,10 +332,24 @@ impl Large {
             theme::icon_tile(ui, icon::FOLDER, p.accent, 46.0);
             ui.vertical(|ui| {
                 ui.label(theme::bold(fmt_size(total), 28.0));
+                let limit = if self.min_mb >= 1000 {
+                    format!("{} GB", self.min_mb / 1000)
+                } else {
+                    format!("{} MB", self.min_mb)
+                };
                 ui.label(theme::dim(
-                    format!("in {} files larger than {} MB", self.files.len(), self.min_mb),
+                    format!("in {} larger than {limit}", theme::plural(self.files.len(), "file")),
                     13.5,
                 ));
+                if self.partial {
+                    ui.label(
+                        theme::text(
+                            format!("{}  Scan stopped early — results are incomplete", icon::WARNING),
+                            12.0,
+                        )
+                        .color(theme::WARN),
+                    );
+                }
             });
             ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
                 if theme::pill(
@@ -341,6 +360,15 @@ impl Large {
                 .clicked()
                 {
                     self.start(ctx);
+                }
+                if theme::pill(ui, "Change size", Color32::from_white_alpha(18))
+                    .on_hover_text("Pick a different minimum file size")
+                    .clicked()
+                {
+                    self.scanned = false;
+                    self.files.clear();
+                    self.selected.clear();
+                    self.confirm = false;
                 }
             });
         });
