@@ -33,9 +33,39 @@ Tip: run `./scripts/setup-signing.sh` once so Full Disk Access survives rebuilds
 | `src/fsutil.rs` | Sizes, delete/trash, **safety allowlist**, permissions |
 | `src/junk.rs` | System Junk |
 | `src/large.rs` | Large & Old Files |
+| `src/dupes.rs` | Duplicates |
 | `src/uninstall.rs` | Uninstaller (icons, arch detection, leftovers) |
 | `src/agents.rs` | Launch Agents |
 | `src/job.rs` | Background jobs |
+
+## Branches and releases
+
+`main` is protected: nothing is pushed to it directly. Every change arrives through a
+pull request, and a pull request can only be merged when the **CI** check (formatting,
+tests, app build) passes.
+
+| Branch | Use it for | Example |
+|---|---|---|
+| `main` | What the latest release is built from. Always working. | — |
+| `release/vX.Y.Z` | Everything that goes into the next version | `release/v0.3.0` |
+| `fix/...` | A single bug fix | `fix/trash-size` |
+| `feature/...` | A single new feature | `feature/menu-bar` |
+
+How an update goes:
+
+1. Start a branch from the latest `main`:
+   ```bash
+   git switch main && git pull
+   git switch -c release/v0.3.0
+   ```
+2. Commit and push your work: `git push -u origin release/v0.3.0`.
+3. Open a pull request into `main`. CI runs on every push to it.
+4. When CI is green, merge with **Squash and merge** or **Merge**. The branch is deleted automatically.
+5. Bump `version` in `Cargo.toml`, add the version's section to `CHANGELOG.md`, then tag the release from `main`:
+   ```bash
+   git switch main && git pull
+   git tag v0.3.0 && git push origin v0.3.0
+   ```
 
 ## Pull requests
 
