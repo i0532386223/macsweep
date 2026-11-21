@@ -35,7 +35,7 @@ row() {
     elif [[ "$a" == "$b" ]]; then
         mark="✅"; pass=$((pass + 1))
     elif [[ "$tol" != 0 && "$a" =~ ^[0-9]+$ && "$b" =~ ^[0-9]+$ ]] && (( (a > b ? a - b : b - a) <= tol )); then
-        mark="✅ (live counter, read seconds apart)"; pass=$((pass + 1))
+        mark="✅ (changes live; read seconds apart)"; pass=$((pass + 1))
     else
         mark="❌"; fail=$((fail + 1))
     fi
