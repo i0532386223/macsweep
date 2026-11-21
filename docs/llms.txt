@@ -18,6 +18,8 @@ Not to be confused with other, unrelated projects that are also named MacSweep. 
 - Large & Old Files: home-folder scan grouped by type (videos, archives, installers, models & data, audio, images, documents) with a "not opened in a year" filter.
 - Duplicates (v0.2): exact duplicate files (same size + BLAKE3 hash) in Desktop, Documents, Downloads, Pictures, Movies and Music. Never scans ~/Library, Photos/Music libraries, app bundles, developer folders or iCloud-only files. Always keeps at least one copy; extras are moved to the Trash after re-checking they are unchanged.
 - Launch Agents: lists user and system agents and daemons and flags orphaned ones whose program no longer exists.
+- Mac Health (v0.3): battery health (Apple's own Maximum Capacity and Condition from system_profiler, cycle count, raw mAh readings), SSD health from the drive's NVMe SMART log (percentage of rated lifespan used, spare blocks, data written, errors, temperature) and system details. Values are validated against Apple's tools and smartctl (23 of 23 matched on a MacBook Air M1); nothing is estimated.
+- Menu bar monitor (v0.3, optional, off by default): CPU, memory and free disk in the menu bar from a separate native helper. Measured on a MacBook Air M1: 2.2% of one core at 1-second updates, 0.5% at 5-second updates, about 13-22 MB of memory.
 - Live free-space and Trash size in the sidebar, with one-click Empty Trash.
 
 ## Safety model

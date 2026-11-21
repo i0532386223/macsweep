@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.3.0
+
+### New: Mac Health
+- **Battery:** Apple's own Maximum Capacity and Condition (the same values System Settings shows), charge cycles against the number the battery is designed for, the current charge, and the battery's raw mAh readings.
+- **Storage:** macOS's own S.M.A.R.T. verdict plus the SSD's health log: share of its rated lifespan used, spare blocks left, data written and read, power-on hours, unexpected power losses, error counts and temperature.
+- **System:** model, chip, memory, macOS version, uptime, thermal state, memory in use with memory pressure, and swap.
+- Nothing is estimated. If macOS doesn't report a value, MacSweep shows "Not available". Hover any value to see where it comes from.
+
+**Validated:** on a MacBook Air M1 (macOS 27.3), all 23 values with a reference tool match Apple's tools (System Settings, `system_profiler`, `ioreg`, `sysctl`) and smartctl exactly. Two live values (temperature, data read) differed by a hair because the tools read seconds apart. Full table and method: [docs/health-validation.md](docs/health-validation.md). Run `scripts/validate-health.sh` to check your own Mac.
+
+Apple calculates Maximum Capacity its own way. On the test Mac the raw mAh ratios were 89% and 86% while Apple showed 90%, so MacSweep never calculates it and always shows Apple's figure.
+
+### New: menu bar monitor (optional, off by default)
+- Shows CPU, memory and free disk space in the menu bar. Choose which, and update **live (every second)**, every 2 s or every 5 s.
+- A separate tiny native helper, so MacSweep itself doesn't stay open. Settings apply instantly. Turning it off, in Mac Health or from its own menu, removes it completely.
+- Its menu shows details (memory pressure, disk space) and what the monitor itself is using.
+
+**Measured cost** on a MacBook Air M1, macOS 27.3, 5 minutes per setting (`scripts/bench-monitor.sh`):
+
+| Update rate | CPU (of one core) | Energy Impact | Memory (Activity Monitor), avg / max |
+|---|---|---|---|
+| Live (1 s) | 2.21 % | 2.29 | 12.8 / 14.7 MB |
+| Every 2 s | 1.33 % | 1.34 | 18.5 / 22.0 MB |
+| Every 5 s | 0.46 % | 0.28 | 20.0 / 22.0 MB |
+
+The M1 has 8 cores, so Live is about 0.3 % of the whole Mac. Profiling showed our own code is under 1 ms per update. The rest is macOS redrawing the menu-bar item, which every monitor that updates each second pays. We tried drawing the numbers as an image instead of text: no measurable difference, so the simpler text stays.
+
+### Development
+- `main` is protected: every change goes through a pull request, and CI (formatting, tests, app build) must pass.
+
 ## v0.2.0
 
 ### New: Duplicates

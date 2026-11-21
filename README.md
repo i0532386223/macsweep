@@ -25,7 +25,7 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 
 - **Free and open source.** No subscription, no ads, no "upgrade to clean" paywall. Every line is right here.
 - **Safe by design.** It never touches your browser profiles, email, passwords or app data (see [Safety](#safety--your-data-is-never-touched)).
-- **Tiny and fast.** One native Rust binary of about 7 MB. Scans use every CPU core, and the app uses no CPU when idle.
+- **Tiny and fast.** One native Rust binary of about 7 MB. Scans use every CPU core, and nothing runs in the background unless you turn on the menu bar monitor.
 - **Private.** No accounts, no telemetry, no network access. Everything happens on your Mac.
 
 ## Features
@@ -38,6 +38,8 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 | 🗂️ **Duplicates** | Finds exact duplicate files (same size and same BLAKE3 content hash) in Desktop, Documents, Downloads, Pictures, Movies and Music. Always keeps at least one copy, never looks inside Photos/Music libraries or app data, and moves extras to the Trash. |
 | 📦 **Uninstaller** | Every app with its icon, version, App Store / Apple Silicon / Intel badges, last-opened date and **true size including leftovers**. Select several apps at once. |
 | 🚀 **Launch Agents** | Lists background helpers and flags **orphaned** ones whose app is already gone. |
+| ❤️ **Mac Health** | Battery health (Apple's own Maximum Capacity and Condition, cycle count), SSD health (lifespan used, spare blocks, data written, errors) and system details. Every value comes from macOS itself and is [validated against Apple's tools](docs/health-validation.md). |
+| 📊 **Menu bar monitor** | Optional and off by default: live CPU, memory and free disk space in the menu bar, from a separate tiny helper. [Measured cost](CHANGELOG.md#v030): 2.2% of one core at live updates, 0.5% at every 5 s. |
 | 💾 **Live disk & Trash** | The sidebar always shows free space and Trash size, updates instantly after every clean, and has a one-click **Empty Trash**. |
 
 <table>
@@ -109,7 +111,8 @@ UNIVERSAL=1 ./bundle.sh     # Apple Silicon + Intel in one app
 ## Roadmap
 
 - [x] Duplicate file finder (v0.2)
-- [ ] Menu-bar mini monitor (disk, RAM, CPU)
+- [x] Menu-bar mini monitor (disk, RAM, CPU) (v0.3)
+- [x] Mac Health: battery, SSD and system health (v0.3)
 - [ ] Browser cache cleanup per browser (cache only, never profiles)
 - [ ] Scheduled scans and reminders
 - [ ] Homebrew install (`brew install --cask macsweep`)
