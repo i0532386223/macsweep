@@ -205,6 +205,28 @@ mod mac {
             *self.timer.borrow_mut() = Some(timer);
         }
 
+        /// Gives the item a fixed width, wide enough for the largest numbers.
+        ///
+        /// Profiling showed most of the monitor's CPU time is macOS redrawing
+        /// the menu-bar item after each change. With a variable width, every
+        /// change also resized the item and re-ran the menu bar's layout;
+        /// with a fixed width only the text is redrawn.
+        fn fix_width(&self) {
+            let Some(button) = self.item.button(self.mtm) else { return };
+            let widest = stats::title(
+                &self.config.get(),
+                100.0,
+                100,
+                100,
+                Some(999_000_000_000),
+                stats::Pressure::Warning,
+            );
+            button.setTitle(&NSString::from_str(&widest));
+            let w = button.fittingSize().width;
+            self.item.setLength(w.ceil() + 4.0);
+            self.title.borrow_mut().clear(); // force the real text on the next redraw
+        }
+
         /// New settings from MacSweep: apply at once, no restart.
         fn reload(self: &Rc<Self>) {
             let old = self.config.get();
@@ -213,6 +235,7 @@ mod mac {
             if new.interval != old.interval {
                 self.schedule();
             }
+            self.fix_width();
             self.redraw();
         }
     }
@@ -296,6 +319,7 @@ mod mac {
         // No Dock icon, no app menu: just the menu-bar item.
         app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 
+        // The real width is set by fix_width() once the font is in place.
         let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
         if let Some(button) = item.button(mtm) {
             // Digits of equal width, so the item doesn't wobble as numbers change.
@@ -337,6 +361,7 @@ mod mac {
             menu_open: Cell::new(false),
         });
         MONITOR.with(|g| *g.borrow_mut() = Some(m.clone()));
+        m.fix_width();
         m.redraw();
         m.schedule();
 
