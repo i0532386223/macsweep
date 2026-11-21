@@ -184,18 +184,20 @@ pub fn repair_on_launch() {
 fn usage() -> Option<(u64, f32)> {
     let pid = String::from_utf8(Command::new("pgrep").args(["-x", "macsweep-monitor"]).output().ok()?.stdout).ok()?;
     let pid = pid.lines().next()?.trim().to_string();
-    let out = String::from_utf8(
-        Command::new("ps")
-            .args(["-o", "rss=,%cpu=", "-p", &pid])
-            .output()
-            .ok()?
-            .stdout,
-    )
-    .ok()?;
-    let mut it = out.split_whitespace();
-    let rss_kb: u64 = it.next()?.parse().ok()?;
-    let cpu: f32 = it.next()?.parse().ok()?;
-    Some((rss_kb * 1024, cpu))
+    let out = String::from_utf8(Command::new("ps").args(["-o", "%cpu=", "-p", &pid]).output().ok()?.stdout).ok()?;
+    let cpu: f32 = out.trim().parse().ok()?;
+    Some((footprint(pid.parse().ok()?)?, cpu))
+}
+
+/// Activity Monitor's memory figure for a process (see stats.rs).
+#[cfg(target_os = "macos")]
+fn footprint(pid: i32) -> Option<u64> {
+    crate::health::footprint(pid)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn footprint(_pid: i32) -> Option<u64> {
+    None
 }
 
 pub struct Monitor {

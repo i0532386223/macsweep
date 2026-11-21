@@ -230,20 +230,37 @@ mod mac {
         (unsafe { libc::statfs(root.as_ptr(), &mut s) } == 0).then(|| s.f_bavail * u64::from(s.f_bsize))
     }
 
-    /// Our own resident memory, so the menu can show what the monitor costs.
+    /// `struct rusage_info_v0` from <sys/resource.h>.
+    #[repr(C)]
+    struct RusageV0 {
+        uuid: [u8; 16],
+        user_time: u64,
+        system_time: u64,
+        pkg_idle_wkups: u64,
+        interrupt_wkups: u64,
+        pageins: u64,
+        wired_size: u64,
+        resident_size: u64,
+        phys_footprint: u64,
+        proc_start_abstime: u64,
+        proc_exit_abstime: u64,
+    }
+
+    unsafe extern "C" {
+        fn proc_pid_rusage(pid: i32, flavor: i32, buffer: *mut RusageV0) -> i32;
+    }
+
+    /// Memory of a process the way Activity Monitor's "Memory" column counts
+    /// it (the physical footprint). Unlike resident size, it doesn't include
+    /// system libraries shared by every app.
+    pub fn footprint(pid: i32) -> Option<u64> {
+        let mut r: RusageV0 = unsafe { std::mem::zeroed() };
+        (unsafe { proc_pid_rusage(pid, 0, &mut r) } == 0).then_some(r.phys_footprint)
+    }
+
+    /// What the monitor itself uses, for its own menu.
     pub fn own_memory() -> u64 {
-        let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
-        let size = std::mem::size_of::<libc::proc_taskinfo>() as i32;
-        let n = unsafe {
-            libc::proc_pidinfo(
-                libc::getpid(),
-                libc::PROC_PIDTASKINFO,
-                0,
-                (&mut info as *mut libc::proc_taskinfo).cast(),
-                size,
-            )
-        };
-        if n == size { info.pti_resident_size } else { 0 }
+        footprint(unsafe { libc::getpid() }).unwrap_or(0)
     }
 
     fn sysctl_u64(name: &str) -> Option<u64> {

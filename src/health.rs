@@ -287,6 +287,9 @@ pub fn collect() -> Health {
 #[allow(dead_code)]
 mod stats;
 
+#[cfg(target_os = "macos")]
+pub use stats::footprint;
+
 #[cfg(not(target_os = "macos"))]
 mod mac {
     pub fn read_smart_log(_bsd: &str) -> Option<[u8; 512]> {
