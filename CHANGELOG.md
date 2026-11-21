@@ -25,6 +25,8 @@ Apple calculates Maximum Capacity its own way. On the test Mac the raw mAh ratio
 | Every 2 s | 1.33 % | 1.34 | 18.5 / 22.0 MB |
 | Every 5 s | 0.46 % | 0.28 | 20.0 / 22.0 MB |
 
+A **1-hour run at Live** showed no memory growth: 13.1 MB on average, never above 14.7 MB, at 2.34 % CPU and Energy Impact 2.25.
+
 The M1 has 8 cores, so Live is about 0.3 % of the whole Mac. Profiling showed our own code is under 1 ms per update. The rest is macOS redrawing the menu-bar item, which every monitor that updates each second pays. We tried drawing the numbers as an image instead of text: no measurable difference, so the simpler text stays.
 
 ### Development
