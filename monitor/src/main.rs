@@ -30,15 +30,17 @@ mod mac {
     use block2::RcBlock;
     use objc2::rc::Retained;
     use objc2::runtime::{AnyObject, NSObject, ProtocolObject};
-    use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+    use objc2::{AnyThread, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::{
-        NSApplication, NSApplicationActivationPolicy, NSFont, NSFontWeightRegular, NSMenu, NSMenuDelegate, NSMenuItem,
-        NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSWorkspace, NSWorkspaceScreensDidSleepNotification,
-        NSWorkspaceScreensDidWakeNotification,
+        NSApplication, NSApplicationActivationPolicy, NSBitmapImageRep, NSCellImagePosition, NSColor, NSDeviceRGBColorSpace,
+        NSFont, NSFontAttributeName, NSFontWeightRegular, NSForegroundColorAttributeName, NSGraphicsContext, NSImage, NSMenu,
+        NSMenuDelegate, NSMenuItem, NSScreen, NSStatusBar, NSStatusItem, NSStringDrawing, NSVariableStatusItemLength,
+        NSWorkspace, NSWorkspaceScreensDidSleepNotification, NSWorkspaceScreensDidWakeNotification,
     };
     use objc2_foundation::{
-        NSArray, NSNotification, NSNumber, NSObjectProtocol, NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer, NSURL,
-        NSURLVolumeAvailableCapacityForImportantUsageKey, ns_string,
+        NSArray, NSAttributedStringKey, NSDictionary, NSNotification, NSNumber, NSObjectProtocol, NSPoint, NSRunLoop,
+        NSRunLoopCommonModes, NSSize, NSString, NSTimer, NSURL, NSURLVolumeAvailableCapacityForImportantUsageKey, NSUserDefaults,
+        ns_string,
     };
     use std::cell::{Cell, RefCell};
     use std::ffi::{CString, c_char, c_void};
@@ -113,6 +115,14 @@ mod mac {
         timer: RefCell<Option<Retained<NSTimer>>>,
         asleep: Cell<bool>,
         menu_open: Cell<bool>,
+        /// Draw the numbers into a ready-made image instead of handing AppKit
+        /// text to lay out and render on every change. Turn off with
+        /// `defaults write com.nihal.macsweep.monitor DrawAsText -bool YES`.
+        as_image: bool,
+        /// Font and colour for drawing (black: the image is a template, so
+        /// macOS tints it to match the menu bar).
+        attrs: Retained<NSDictionary<NSAttributedStringKey, AnyObject>>,
+        scale: f64,
     }
 
     thread_local! {
@@ -147,6 +157,38 @@ mod mac {
             self.redraw();
         }
 
+        /// Renders `text` once into a bitmap the size of the text.
+        fn render(&self, text: &str) -> Option<Retained<NSImage>> {
+            let s = NSString::from_str(text);
+            let size = unsafe { s.sizeWithAttributes(Some(&self.attrs)) };
+            let (w, h) = (size.width.ceil().max(1.0), size.height.ceil().max(1.0));
+            let rep = unsafe {
+                NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+                    NSBitmapImageRep::alloc(),
+                    std::ptr::null_mut(),
+                    (w * self.scale) as isize,
+                    (h * self.scale) as isize,
+                    8,
+                    4,
+                    true,
+                    false,
+                    NSDeviceRGBColorSpace,
+                    0,
+                    0,
+                )
+            }?;
+            rep.setSize(NSSize::new(w, h));
+            let ctx = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
+            NSGraphicsContext::saveGraphicsState_class();
+            NSGraphicsContext::setCurrentContext(Some(&ctx));
+            unsafe { s.drawAtPoint_withAttributes(NSPoint::new(0.0, 0.0), Some(&self.attrs)) };
+            NSGraphicsContext::restoreGraphicsState_class();
+            let img = NSImage::initWithSize(NSImage::alloc(), NSSize::new(w, h));
+            img.addRepresentation(&rep);
+            img.setTemplate(true);
+            Some(img)
+        }
+
         /// Updates the menu-bar text, and the menu only while it's open.
         fn redraw(&self) {
             let s = self.sampler.borrow();
@@ -155,7 +197,10 @@ mod mac {
             // Redrawing costs more than sampling: skip it when nothing changed.
             if *self.title.borrow() != title {
                 if let Some(button) = self.item.button(self.mtm) {
-                    button.setTitle(&NSString::from_str(&title));
+                    match self.as_image.then(|| self.render(&title)).flatten() {
+                        Some(img) => button.setImage(Some(&img)),
+                        None => button.setTitle(&NSString::from_str(&title)),
+                    }
                 }
                 *self.title.borrow_mut() = title;
             }
@@ -221,9 +266,14 @@ mod mac {
                 Some(999_000_000_000),
                 stats::Pressure::Warning,
             );
-            button.setTitle(&NSString::from_str(&widest));
-            let w = button.fittingSize().width;
-            self.item.setLength(w.ceil() + 4.0);
+            if self.as_image {
+                let w = unsafe { NSString::from_str(&widest).sizeWithAttributes(Some(&self.attrs)) }.width;
+                self.item.setLength(w.ceil() + 10.0);
+            } else {
+                button.setTitle(&NSString::from_str(&widest));
+                let w = button.fittingSize().width;
+                self.item.setLength(w.ceil() + 4.0);
+            }
             self.title.borrow_mut().clear(); // force the real text on the next redraw
         }
 
@@ -321,11 +371,23 @@ mod mac {
 
         // The real width is set by fix_width() once the font is in place.
         let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
+        // Digits of equal width, so the item doesn't wobble as numbers change.
+        let font = NSFont::monospacedDigitSystemFontOfSize_weight(12.0, unsafe { NSFontWeightRegular });
+        let as_image = !NSUserDefaults::standardUserDefaults().boolForKey(ns_string!("DrawAsText"));
         if let Some(button) = item.button(mtm) {
-            // Digits of equal width, so the item doesn't wobble as numbers change.
-            let font = NSFont::monospacedDigitSystemFontOfSize_weight(12.0, unsafe { NSFontWeightRegular });
             button.setFont(Some(&font));
+            if as_image {
+                button.setImagePosition(NSCellImagePosition::ImageOnly);
+            }
         }
+        let black = NSColor::blackColor();
+        let font_obj: &AnyObject = font.as_ref();
+        let black_obj: &AnyObject = black.as_ref();
+        let attrs = NSDictionary::from_slices(
+            &[unsafe { NSFontAttributeName }, unsafe { NSForegroundColorAttributeName }],
+            &[font_obj, black_obj],
+        );
+        let scale = NSScreen::mainScreen(mtm).map_or(2.0, |s| s.backingScaleFactor()).max(1.0);
 
         let actions = Actions::new(mtm);
         let menu = NSMenu::new(mtm);
@@ -359,6 +421,9 @@ mod mac {
             timer: RefCell::new(None),
             asleep: Cell::new(false),
             menu_open: Cell::new(false),
+            as_image,
+            attrs,
+            scale,
         });
         MONITOR.with(|g| *g.borrow_mut() = Some(m.clone()));
         m.fix_width();
