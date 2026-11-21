@@ -7,7 +7,7 @@ pub struct Config {
     pub cpu: bool,
     pub ram: bool,
     pub disk: bool,
-    /// Seconds between updates.
+    /// Seconds between updates (1 = live).
     pub interval: f64,
 }
 
@@ -17,7 +17,7 @@ impl Default for Config {
             cpu: true,
             ram: true,
             disk: true,
-            interval: 5.0,
+            interval: 1.0,
         }
     }
 }
@@ -281,7 +281,7 @@ mod tests {
             1.0,
             "never faster than once a second"
         );
-        assert_eq!(Config::parse("interval=abc").interval, 5.0);
+        assert_eq!(Config::parse("interval=abc").interval, 1.0);
     }
 
     #[test]
@@ -309,7 +309,7 @@ mod tests {
             cpu: false,
             ram: false,
             disk: false,
-            interval: 5.0,
+            interval: 1.0,
         };
         assert_eq!(title(&none, 0.0, 0, 0, None, Pressure::Normal), "MacSweep");
     }

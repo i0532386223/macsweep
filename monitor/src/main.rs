@@ -29,25 +29,36 @@ mod mac {
     use crate::stats::{self, Config, Sampler};
     use block2::RcBlock;
     use objc2::rc::Retained;
-    use objc2::runtime::{AnyObject, NSObject};
+    use objc2::runtime::{AnyObject, NSObject, ProtocolObject};
     use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::{
-        NSApplication, NSApplicationActivationPolicy, NSFont, NSFontWeightRegular, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem,
-        NSVariableStatusItemLength, NSWorkspace, NSWorkspaceScreensDidSleepNotification, NSWorkspaceScreensDidWakeNotification,
+        NSApplication, NSApplicationActivationPolicy, NSFont, NSFontWeightRegular, NSMenu, NSMenuDelegate, NSMenuItem,
+        NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSWorkspace, NSWorkspaceScreensDidSleepNotification,
+        NSWorkspaceScreensDidWakeNotification,
     };
     use objc2_foundation::{
-        NSArray, NSNotification, NSNumber, NSString, NSTimer, NSURL, NSURLVolumeAvailableCapacityForImportantUsageKey, ns_string,
+        NSArray, NSNotification, NSNumber, NSObjectProtocol, NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer, NSURL,
+        NSURLVolumeAvailableCapacityForImportantUsageKey, ns_string,
     };
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
+    use std::ffi::{CString, c_char, c_void};
     use std::path::PathBuf;
     use std::ptr::NonNull;
     use std::rc::Rc;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     pub const LABEL: &str = "com.nihal.macsweep.monitor";
+    /// Posted by MacSweep after it saves new settings (Darwin notification).
+    pub const RELOAD: &str = "com.nihal.macsweep.monitor.reload";
 
-    /// True while the displays are asleep: nobody can see the menu bar.
-    static ASLEEP: AtomicBool = AtomicBool::new(false);
+    unsafe extern "C" {
+        static _dispatch_main_q: c_void;
+        fn notify_register_dispatch(
+            name: *const c_char,
+            out_token: *mut i32,
+            queue: *const c_void,
+            handler: &block2::Block<dyn Fn(i32)>,
+        ) -> u32;
+    }
 
     fn home() -> PathBuf {
         std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
@@ -84,12 +95,151 @@ mod mac {
         found.or_else(stats::disk_free_plain)
     }
 
+    /// Everything the monitor keeps between updates. Lives on the main thread.
+    struct Monitor {
+        mtm: MainThreadMarker,
+        item: Retained<NSStatusItem>,
+        cpu_line: Retained<NSMenuItem>,
+        ram_line: Retained<NSMenuItem>,
+        pressure_line: Retained<NSMenuItem>,
+        disk_line: Retained<NSMenuItem>,
+        own_line: Retained<NSMenuItem>,
+        sampler: RefCell<Sampler>,
+        config: Cell<Config>,
+        disk: Cell<Option<u64>>,
+        disk_at: Cell<f64>,
+        cpu: Cell<f64>,
+        title: RefCell<String>,
+        timer: RefCell<Option<Retained<NSTimer>>>,
+        asleep: Cell<bool>,
+        menu_open: Cell<bool>,
+    }
+
+    thread_local! {
+        static MONITOR: RefCell<Option<Rc<Monitor>>> = const { RefCell::new(None) };
+    }
+
+    fn with_monitor(f: impl FnOnce(&Rc<Monitor>)) {
+        if let Some(m) = MONITOR.with(|m| m.borrow().clone()) {
+            f(&m);
+        }
+    }
+
+    fn now() -> f64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    impl Monitor {
+        /// Takes a new sample and redraws. Called once per interval.
+        fn tick(&self) {
+            if self.asleep.get() {
+                return;
+            }
+            self.cpu.set(self.sampler.borrow_mut().cpu());
+            // Disk space changes slowly: every 30 s is plenty.
+            if now() - self.disk_at.get() > 30.0 {
+                self.disk_at.set(now());
+                self.disk.set(disk_free());
+            }
+            self.redraw();
+        }
+
+        /// Updates the menu-bar text, and the menu only while it's open.
+        fn redraw(&self) {
+            let s = self.sampler.borrow();
+            let (used, total, p) = (s.ram_used(), s.ram_total, stats::pressure());
+            let title = stats::title(&self.config.get(), self.cpu.get(), used, total, self.disk.get(), p);
+            // Redrawing costs more than sampling: skip it when nothing changed.
+            if *self.title.borrow() != title {
+                if let Some(button) = self.item.button(self.mtm) {
+                    button.setTitle(&NSString::from_str(&title));
+                }
+                *self.title.borrow_mut() = title;
+            }
+            if self.menu_open.get() {
+                let set = |item: &NSMenuItem, t: String| item.setTitle(&NSString::from_str(&t));
+                set(&self.cpu_line, format!("CPU: {:.0}%", self.cpu.get()));
+                set(
+                    &self.ram_line,
+                    format!("Memory: {} of {} used", stats::fmt_bytes(used), stats::fmt_bytes(total)),
+                );
+                set(&self.pressure_line, format!("Memory pressure: {}", p.label()));
+                set(
+                    &self.disk_line,
+                    match self.disk.get() {
+                        Some(f) => format!("Disk: {} available", stats::fmt_bytes(f)),
+                        None => "Disk: unknown".into(),
+                    },
+                );
+                set(
+                    &self.own_line,
+                    format!(
+                        "This monitor: {:.1} MB · updates every {:.0} s",
+                        stats::own_memory() as f64 / 1e6,
+                        self.config.get().interval
+                    ),
+                );
+            }
+        }
+
+        /// (Re)starts the update timer at the configured interval.
+        fn schedule(self: &Rc<Self>) {
+            if let Some(old) = self.timer.borrow_mut().take() {
+                old.invalidate();
+            }
+            let interval = self.config.get().interval;
+            let me = Rc::downgrade(self);
+            let tick = RcBlock::new(move |_: NonNull<NSTimer>| {
+                if let Some(m) = me.upgrade() {
+                    m.tick();
+                }
+            });
+            let timer = unsafe { NSTimer::timerWithTimeInterval_repeats_block(interval, true, &tick) };
+            // A little slack lets macOS batch our wake-up with its own.
+            timer.setTolerance(interval * 0.1);
+            // "Common modes" keeps it running while the menu is open, too.
+            unsafe { NSRunLoop::mainRunLoop().addTimer_forMode(&timer, NSRunLoopCommonModes) };
+            *self.timer.borrow_mut() = Some(timer);
+        }
+
+        /// New settings from MacSweep: apply at once, no restart.
+        fn reload(self: &Rc<Self>) {
+            let old = self.config.get();
+            let new = config();
+            self.config.set(new);
+            if new.interval != old.interval {
+                self.schedule();
+            }
+            self.redraw();
+        }
+    }
+
     define_class!(
-        // Receives the menu's clicks.
+        // Receives the menu's clicks and open/close events.
         #[unsafe(super(NSObject))]
         #[thread_kind = MainThreadOnly]
         #[name = "MacSweepMonitorActions"]
         struct Actions;
+
+        unsafe impl NSObjectProtocol for Actions {}
+
+        unsafe impl NSMenuDelegate for Actions {
+            #[unsafe(method(menuWillOpen:))]
+            fn menu_will_open(&self, _menu: &NSMenu) {
+                with_monitor(|m| {
+                    m.menu_open.set(true);
+                    m.redraw();
+                });
+            }
+
+            #[unsafe(method(menuDidClose:))]
+            fn menu_did_close(&self, _menu: &NSMenu) {
+                with_monitor(|m| m.menu_open.set(false));
+            }
+        }
 
         impl Actions {
             #[unsafe(method(openMacSweep:))]
@@ -104,11 +254,10 @@ mod mac {
             fn turn_off(&self, _sender: Option<&AnyObject>) {
                 let plist = home().join(format!("Library/LaunchAgents/{LABEL}.plist"));
                 let _ = std::fs::remove_file(&plist);
-                let uid = unsafe { libc::getuid() };
-                // Stops this process; exit below is the fallback.
+                // Tell launchd to forget us, without waiting for the answer.
                 let _ = std::process::Command::new("launchctl")
-                    .args(["bootout", &format!("gui/{uid}/{LABEL}")])
-                    .status();
+                    .args(["remove", LABEL])
+                    .spawn();
                 std::process::exit(0);
             }
         }
@@ -123,6 +272,7 @@ mod mac {
     fn info_item(mtm: MainThreadMarker, menu: &NSMenu) -> Retained<NSMenuItem> {
         let item = NSMenuItem::new(mtm);
         item.setEnabled(false);
+        item.setTitle(ns_string!("…"));
         menu.addItem(&item);
         item
     }
@@ -140,64 +290,6 @@ mod mac {
         menu.addItem(&item);
     }
 
-    struct Ui {
-        item: Retained<NSStatusItem>,
-        cpu: Retained<NSMenuItem>,
-        ram: Retained<NSMenuItem>,
-        pressure: Retained<NSMenuItem>,
-        disk: Retained<NSMenuItem>,
-        own: Retained<NSMenuItem>,
-    }
-
-    struct State {
-        sampler: Sampler,
-        config: Config,
-        disk: Option<u64>,
-        ticks: u64,
-    }
-
-    fn set(item: &NSMenuItem, text: &str) {
-        item.setTitle(&NSString::from_str(text));
-    }
-
-    fn update(ui: &Ui, s: &mut State, mtm: MainThreadMarker) {
-        let cpu = s.sampler.cpu();
-        let used = s.sampler.ram_used();
-        let total = s.sampler.ram_total;
-        let p = stats::pressure();
-        // Disk space changes slowly: once a minute is plenty.
-        let every = (60.0 / s.config.interval).ceil().max(1.0) as u64;
-        if s.ticks % every == 0 {
-            s.disk = disk_free();
-        }
-        s.ticks += 1;
-
-        if let Some(button) = ui.item.button(mtm) {
-            button.setTitle(&NSString::from_str(&stats::title(&s.config, cpu, used, total, s.disk, p)));
-        }
-        set(&ui.cpu, &format!("CPU: {cpu:.0}%"));
-        set(
-            &ui.ram,
-            &format!("Memory: {} of {} used", stats::fmt_bytes(used), stats::fmt_bytes(total)),
-        );
-        set(&ui.pressure, &format!("Memory pressure: {}", p.label()));
-        set(
-            &ui.disk,
-            &match s.disk {
-                Some(f) => format!("Disk: {} available", stats::fmt_bytes(f)),
-                None => "Disk: unknown".into(),
-            },
-        );
-        set(
-            &ui.own,
-            &format!(
-                "This monitor: {:.1} MB · updates every {:.0} s",
-                stats::own_memory() as f64 / 1e6,
-                s.config.interval
-            ),
-        );
-    }
-
     pub fn run() {
         let mtm = MainThreadMarker::new().expect("must start on the main thread");
         let app = NSApplication::sharedApplication(mtm);
@@ -209,32 +301,61 @@ mod mac {
             // Digits of equal width, so the item doesn't wobble as numbers change.
             let font = NSFont::monospacedDigitSystemFontOfSize_weight(12.0, unsafe { NSFontWeightRegular });
             button.setFont(Some(&font));
-            button.setTitle(ns_string!("MacSweep"));
         }
 
         let actions = Actions::new(mtm);
         let menu = NSMenu::new(mtm);
         menu.setAutoenablesItems(false);
-        let ui = Ui {
-            cpu: info_item(mtm, &menu),
-            ram: info_item(mtm, &menu),
-            pressure: info_item(mtm, &menu),
-            disk: info_item(mtm, &menu),
-            own: {
-                menu.addItem(&NSMenuItem::separatorItem(mtm));
-                info_item(mtm, &menu)
-            },
-            item,
-        };
+        menu.setDelegate(Some(ProtocolObject::from_ref(&*actions)));
+        let cpu_line = info_item(mtm, &menu);
+        let ram_line = info_item(mtm, &menu);
+        let pressure_line = info_item(mtm, &menu);
+        let disk_line = info_item(mtm, &menu);
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        let own_line = info_item(mtm, &menu);
         menu.addItem(&NSMenuItem::separatorItem(mtm));
         action_item(mtm, &menu, "Open MacSweep", sel!(openMacSweep:), &actions);
         action_item(mtm, &menu, "Turn Off Menu Bar Monitor", sel!(turnOff:), &actions);
-        ui.item.setMenu(Some(&menu));
+        item.setMenu(Some(&menu));
 
-        // Pause while the displays sleep.
+        let m = Rc::new(Monitor {
+            mtm,
+            item,
+            cpu_line,
+            ram_line,
+            pressure_line,
+            disk_line,
+            own_line,
+            sampler: RefCell::new(Sampler::new()),
+            config: Cell::new(config()),
+            disk: Cell::new(disk_free()),
+            disk_at: Cell::new(now()),
+            cpu: Cell::new(0.0),
+            title: RefCell::new(String::new()),
+            timer: RefCell::new(None),
+            asleep: Cell::new(false),
+            menu_open: Cell::new(false),
+        });
+        MONITOR.with(|g| *g.borrow_mut() = Some(m.clone()));
+        m.redraw();
+        m.schedule();
+
+        // Settings changed in MacSweep: apply instantly. Costs nothing until it fires.
+        let reload = RcBlock::new(|_token: i32| with_monitor(|m| m.reload()));
+        let name = CString::new(RELOAD).unwrap();
+        let mut token = 0;
+        unsafe { notify_register_dispatch(name.as_ptr(), &mut token, &_dispatch_main_q, &reload) };
+
+        // Pause while the displays sleep; catch up the moment they wake.
         let center = NSWorkspace::sharedWorkspace().notificationCenter();
-        let sleep = RcBlock::new(|_: NonNull<NSNotification>| ASLEEP.store(true, Ordering::Relaxed));
-        let wake = RcBlock::new(|_: NonNull<NSNotification>| ASLEEP.store(false, Ordering::Relaxed));
+        let sleep = RcBlock::new(|_: NonNull<NSNotification>| with_monitor(|m| m.asleep.set(true)));
+        let wake = RcBlock::new(|_: NonNull<NSNotification>| {
+            with_monitor(|m| {
+                m.asleep.set(false);
+                m.disk_at.set(0.0);
+                m.tick();
+            })
+        });
         let _observers = unsafe {
             (
                 center.addObserverForName_object_queue_usingBlock(
@@ -246,26 +367,6 @@ mod mac {
                 center.addObserverForName_object_queue_usingBlock(Some(NSWorkspaceScreensDidWakeNotification), None, None, &wake),
             )
         };
-
-        let config = config();
-        let state = Rc::new(RefCell::new(State {
-            sampler: Sampler::new(),
-            config,
-            disk: None,
-            ticks: 0,
-        }));
-        let ui = Rc::new(ui);
-        update(&ui, &mut state.borrow_mut(), mtm);
-
-        let (ui2, state2) = (ui.clone(), state.clone());
-        let tick = RcBlock::new(move |_: NonNull<NSTimer>| {
-            if !ASLEEP.load(Ordering::Relaxed) {
-                update(&ui2, &mut state2.borrow_mut(), mtm);
-            }
-        });
-        let timer = unsafe { NSTimer::scheduledTimerWithTimeInterval_repeats_block(config.interval, true, &tick) };
-        // Let macOS shift each wake-up by up to 20% to batch it with others.
-        timer.setTolerance(config.interval * 0.2);
 
         app.run();
     }

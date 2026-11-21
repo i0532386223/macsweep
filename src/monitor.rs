@@ -27,7 +27,7 @@ impl Default for Config {
             cpu: true,
             ram: true,
             disk: true,
-            interval: 5,
+            interval: 1,
         }
     }
 }
@@ -41,7 +41,7 @@ impl Config {
                 "cpu" => c.cpu = on,
                 "ram" => c.ram = on,
                 "disk" => c.disk = on,
-                "interval" => c.interval = v.trim().parse().unwrap_or(5),
+                "interval" => c.interval = v.trim().parse().unwrap_or(1).clamp(1, 60),
                 _ => {}
             }
         }
@@ -148,9 +148,17 @@ fn turn_off() {
     let _ = std::fs::remove_file(plist_path());
 }
 
-/// Restart so new settings take effect.
-fn restart() {
-    let _ = launchctl(&["kickstart", "-k", &format!("gui/{}/{LABEL}", uid())]);
+/// Tells a running monitor to re-read its settings. Instant, never blocks:
+/// a Darwin notification, which the monitor receives at no cost while idle.
+fn notify_monitor() {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn notify_post(name: *const std::ffi::c_char) -> u32;
+        }
+        let name = std::ffi::CString::new("com.nihal.macsweep.monitor.reload").unwrap();
+        unsafe { notify_post(name.as_ptr()) };
+    }
 }
 
 /// If MacSweep was moved or updated, point the login item at this copy.
@@ -193,6 +201,8 @@ fn usage() -> Option<(u64, f32)> {
 pub struct Monitor {
     config: Config,
     on: bool,
+    /// Turning on/off talks to launchd, which can take a moment: off the UI thread.
+    switching: Option<Job<Result<bool, String>>>,
     usage: Option<(u64, f32)>,
     usage_job: Option<Job<Option<(u64, f32)>>>,
     usage_at: f64,
@@ -204,6 +214,7 @@ impl Default for Monitor {
         Self {
             config: Config::parse(&std::fs::read_to_string(conf_path()).unwrap_or_default()),
             on: is_on(),
+            switching: None,
             usage: None,
             usage_job: None,
             usage_at: -100.0,
@@ -220,7 +231,7 @@ impl Monitor {
         }
         let _ = std::fs::write(&p, self.config.render());
         if self.on {
-            restart();
+            notify_monitor();
         }
     }
 
@@ -234,6 +245,19 @@ impl Monitor {
         }
         if let Some(u) = job::poll(&mut self.usage_job, &ctx) {
             self.usage = u;
+        }
+        if let Some(r) = job::poll(&mut self.switching, &ctx) {
+            match r {
+                Ok(on) => {
+                    self.on = on;
+                    self.usage = None;
+                    self.usage_at = now - 2.0; // measure soon after it starts
+                }
+                Err(e) => {
+                    self.on = is_on();
+                    self.error = Some(e);
+                }
+            }
         }
         if self.on {
             ctx.request_repaint_after(std::time::Duration::from_secs(3));
@@ -261,24 +285,27 @@ impl Monitor {
             .show(ui, |ui| {
                 theme::centered(ui, |ui| {
                     ui.add_space(4.0);
-                    let label = if self.on { "Turn Off" } else { "Turn On" };
-                    if theme::round_button(ui, label, p, true).clicked() {
+                    let busy = self.switching.is_some();
+                    let label = match (busy, self.on) {
+                        (true, true) => "Turning off…",
+                        (true, false) => "Turning on…",
+                        (false, true) => "Turn Off",
+                        (false, false) => "Turn On",
+                    };
+                    if theme::round_button(ui, label, p, !busy).clicked() {
                         self.error = None;
-                        if self.on {
-                            turn_off();
-                            self.on = false;
-                            self.usage = None;
-                        } else {
-                            let _ = std::fs::create_dir_all(conf_path().parent().unwrap_or(&fsutil::home()));
-                            let _ = std::fs::write(conf_path(), self.config.render());
-                            match turn_on() {
-                                Ok(()) => {
-                                    self.on = true;
-                                    self.usage_at = now - 2.0; // measure soon after it starts
-                                }
-                                Err(e) => self.error = Some(e),
-                            }
+                        let turning_on = !self.on;
+                        if turning_on {
+                            self.save();
                         }
+                        self.switching = Some(Job::spawn(&ctx, move |_, _| {
+                            if turning_on {
+                                turn_on().map(|_| true)
+                            } else {
+                                turn_off();
+                                Ok(false)
+                            }
+                        }));
                     }
                     let msg = match (&self.error, self.on) {
                         (Some(e), _) => e.clone(),
@@ -312,18 +339,18 @@ impl Monitor {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     ui.label(theme::dim("Update every", 13.0));
-                    for s in [2u32, 5, 10] {
+                    for (s, name) in [(1u32, "Live"), (2, "2 s"), (5, "5 s")] {
                         let fill = if self.config.interval == s {
                             Color32::from_white_alpha(70)
                         } else {
                             Color32::from_white_alpha(18)
                         };
-                        if theme::pill(ui, format!("{s} s"), fill).clicked() && self.config.interval != s {
+                        if theme::pill(ui, name, fill).clicked() && self.config.interval != s {
                             self.config.interval = s;
                             changed = true;
                         }
                     }
-                    ui.label(theme::dim("Less often uses less battery.", 12.0));
+                    ui.label(theme::dim("Live updates every second. Changes apply instantly.", 12.0));
                 });
                 if changed {
                     self.save();
@@ -345,7 +372,7 @@ impl Monitor {
                     ),
                     (
                         icon::POWER,
-                        "Wakes only every few seconds, and not at all while the screen is off.",
+                        "Redraws only when a number changes, and pauses while the screen is off.",
                     ),
                     (
                         icon::LOCK_SIMPLE,
