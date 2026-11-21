@@ -1187,6 +1187,7 @@ dependencies = [
  "jwalk",
  "libc",
  "memmap2",
+ "objc2-foundation 0.3.2",
  "plist",
  "png",
  "rayon",

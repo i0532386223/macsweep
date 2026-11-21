@@ -1,6 +1,8 @@
 mod agents;
 mod dupes;
 mod fsutil;
+mod health;
+mod health_ui;
 mod job;
 mod junk;
 mod large;
@@ -20,7 +22,7 @@ enum Pane {
     Dupes,
     Apps,
     Agents,
-    Monitor,
+    Health,
 }
 
 impl Pane {
@@ -31,7 +33,7 @@ impl Pane {
         Pane::Dupes,
         Pane::Apps,
         Pane::Agents,
-        Pane::Monitor,
+        Pane::Health,
     ];
     fn title(self) -> &'static str {
         match self {
@@ -41,7 +43,7 @@ impl Pane {
             Pane::Dupes => "Duplicates",
             Pane::Apps => "Uninstaller",
             Pane::Agents => "Launch Agents",
-            Pane::Monitor => "Menu Bar Monitor",
+            Pane::Health => "Mac Health",
         }
     }
     fn glyph(self) -> &'static str {
@@ -52,7 +54,7 @@ impl Pane {
             Pane::Dupes => icon::COPY,
             Pane::Apps => icon::PACKAGE,
             Pane::Agents => icon::ROCKET_LAUNCH,
-            Pane::Monitor => icon::GAUGE,
+            Pane::Health => icon::HEART,
         }
     }
     fn palette(self) -> Palette {
@@ -63,7 +65,7 @@ impl Pane {
             Pane::Dupes => theme::DUPES,
             Pane::Apps => theme::APPS,
             Pane::Agents => theme::AGENTS,
-            Pane::Monitor => theme::MONITOR,
+            Pane::Health => theme::HEALTH,
         }
     }
 }
@@ -180,7 +182,7 @@ struct App {
     dupes: dupes::Dupes,
     apps: uninstall::Uninstaller,
     agents: agents::Agents,
-    monitor: monitor::Monitor,
+    health: health_ui::HealthPane,
     sys: Sys,
 }
 
@@ -199,7 +201,7 @@ impl App {
             dupes: Default::default(),
             apps: Default::default(),
             agents: Default::default(),
-            monitor: Default::default(),
+            health: Default::default(),
             sys: Sys::new(),
         }
     }
@@ -580,12 +582,19 @@ impl eframe::App for App {
                 Pane::Dupes => self.dupes.ui(ui, p),
                 Pane::Apps => self.apps.ui(ui, p),
                 Pane::Agents => self.agents.ui(ui, p),
-                Pane::Monitor => self.monitor.ui(ui, p),
+                Pane::Health => self.health.ui(ui, p),
             });
     }
 }
 
 fn main() -> eframe::Result {
+    // `MacSweep --health-report` prints the Mac Health values and exits.
+    // scripts/validate-health.sh compares them with Apple's own tools.
+    if std::env::args().any(|a| a == "--health-report") {
+        println!("{}", health::report(&health::collect()));
+        return Ok(());
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("MacSweep")

@@ -39,8 +39,9 @@ pub mod icon {
     pub const FOLDER_OPEN: &str = "\u{E256}";
     pub const GAUGE: &str = "\u{E628}";
     pub const CPU: &str = "\u{E610}";
-    pub const PULSE: &str = "\u{E000}";
-    pub const POWER: &str = "\u{E3DA}";
+    pub const BATTERY: &str = "\u{E0C0}";
+    pub const BATTERY_CHARGING: &str = "\u{E0BA}";
+    pub const HEART: &str = "\u{E2A8}";
 }
 
 /// Background gradient + accent for one section.
@@ -81,6 +82,13 @@ pub const AGENTS: Palette = Palette {
     bottom: Color32::from_rgb(0x1a, 0x84, 0x96),
     accent: Color32::from_rgb(0x42, 0xd2, 0xe0),
 };
+
+pub const HEALTH: Palette = Palette {
+    top: Color32::from_rgb(0x2a, 0x0e, 0x1c),
+    bottom: Color32::from_rgb(0x8c, 0x2a, 0x48),
+    accent: Color32::from_rgb(0xff, 0x6b, 0x8b),
+};
+pub const GOOD: Color32 = Color32::from_rgb(0x34, 0xd3, 0x99);
 
 pub const MONITOR: Palette = Palette {
     top: Color32::from_rgb(0x10, 0x1c, 0x2c),

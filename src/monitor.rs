@@ -139,7 +139,7 @@ fn turn_on() -> Result<(), String> {
         Ok(())
     } else {
         let _ = std::fs::remove_file(&path);
-        Err("macOS didn't start the monitor. Try again, or check System Settings → General → Login Items.".into())
+        Err("macOS didn't start the monitor. Try again, or check System Settings › General › Login Items.".into())
     }
 }
 
@@ -235,7 +235,8 @@ impl Monitor {
         }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, p: Palette) {
+    /// The Menu Bar Monitor card inside Mac Health.
+    pub fn card(&mut self, ui: &mut Ui, p: Palette) {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
         // Measure the helper every few seconds, only while this screen is open.
@@ -263,36 +264,32 @@ impl Monitor {
             ctx.request_repaint_after(std::time::Duration::from_secs(3));
         }
 
-        ui.horizontal(|ui| {
-            theme::icon_tile(ui, icon::GAUGE, p.accent, 46.0);
-            ui.vertical(|ui| {
-                ui.label(theme::bold("Menu Bar Monitor", 28.0));
-                let sub = match (self.on, self.usage) {
-                    (false, _) => "Off · nothing runs in the background".to_string(),
-                    (true, Some((mem, cpu))) => {
-                        format!("On · using {:.1} MB of memory and {cpu:.1}% CPU", mem as f64 / 1e6)
-                    }
-                    (true, None) => "On · starting…".to_string(),
-                };
-                ui.label(theme::dim(sub, 13.5));
-            });
-        });
-        ui.add_space(10.0);
-
-        egui::Panel::bottom("monitor_action")
-            .frame(theme::bottom_frame())
-            .show_separator_line(false)
-            .show(ui, |ui| {
-                theme::centered(ui, |ui| {
-                    ui.add_space(4.0);
-                    let busy = self.switching.is_some();
-                    let label = match (busy, self.on) {
-                        (true, true) => "Turning off…",
-                        (true, false) => "Turning on…",
-                        (false, true) => "Turn Off",
-                        (false, false) => "Turn On",
+        theme::card(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                theme::icon_tile(ui, icon::GAUGE, p.accent, 34.0);
+                ui.vertical(|ui| {
+                    ui.label(theme::semi("Menu bar monitor", 15.0));
+                    let sub = match (&self.error, self.on, self.usage) {
+                        (Some(e), _, _) => e.clone(),
+                        (None, false, _) => "Off · nothing runs in the background".to_string(),
+                        (None, true, Some((mem, cpu))) => format!(
+                            "On · the monitor itself uses {:.1} MB of memory and {cpu:.1}% CPU",
+                            mem as f64 / 1e6
+                        ),
+                        (None, true, None) => "On · starting…".to_string(),
                     };
-                    if theme::round_button(ui, label, p, !busy).clicked() {
+                    ui.label(theme::dim(sub, 12.5));
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let busy = self.switching.is_some();
+                    let (label, fill) = match (busy, self.on) {
+                        (true, true) => ("Turning off…", Color32::from_white_alpha(35)),
+                        (true, false) => ("Turning on…", Color32::from_white_alpha(35)),
+                        (false, true) => ("Turn Off", Color32::from_white_alpha(35)),
+                        (false, false) => ("Turn On", p.accent.gamma_multiply(0.8)),
+                    };
+                    if theme::pill(ui, label, fill).clicked() && !busy {
                         self.error = None;
                         let turning_on = !self.on;
                         if turning_on {
@@ -307,20 +304,10 @@ impl Monitor {
                             }
                         }));
                     }
-                    let msg = match (&self.error, self.on) {
-                        (Some(e), _) => e.clone(),
-                        (None, true) => "Runs on its own and starts at login. MacSweep can be closed.".into(),
-                        (None, false) => "Off by default. Turning it off removes it completely.".into(),
-                    };
-                    ui.label(theme::dim(msg, 12.5));
                 });
             });
-
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            theme::card(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(theme::semi("What to show", 15.0));
-                ui.add_space(6.0);
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
                 // A small mock of the menu bar, so the choice is easy to judge.
                 egui::Frame::new()
                     .fill(Color32::from_black_alpha(90))
@@ -331,70 +318,33 @@ impl Monitor {
                     });
                 ui.add_space(8.0);
                 let mut changed = false;
-                ui.horizontal(|ui| {
-                    changed |= ui.checkbox(&mut self.config.cpu, "CPU").changed();
-                    changed |= ui.checkbox(&mut self.config.ram, "Memory").changed();
-                    changed |= ui.checkbox(&mut self.config.disk, "Free disk space").changed();
-                });
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label(theme::dim("Update every", 13.0));
-                    for (s, name) in [(1u32, "Live"), (2, "2 s"), (5, "5 s")] {
-                        let fill = if self.config.interval == s {
-                            Color32::from_white_alpha(70)
-                        } else {
-                            Color32::from_white_alpha(18)
-                        };
-                        if theme::pill(ui, name, fill).clicked() && self.config.interval != s {
-                            self.config.interval = s;
-                            changed = true;
-                        }
-                    }
-                    ui.label(theme::dim("Live updates every second. Changes apply instantly.", 12.0));
-                });
+                changed |= ui.checkbox(&mut self.config.cpu, "CPU").changed();
+                changed |= ui.checkbox(&mut self.config.ram, "Memory").changed();
+                changed |= ui.checkbox(&mut self.config.disk, "Free disk space").changed();
                 if changed {
                     self.save();
                 }
             });
-            ui.add_space(10.0);
-            theme::card(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(theme::semi("Built to stay out of your way", 15.0));
-                ui.add_space(6.0);
-                for (glyph, line) in [
-                    (
-                        icon::CPU,
-                        "A separate, tiny native helper. MacSweep itself doesn't stay open.",
-                    ),
-                    (
-                        icon::PULSE,
-                        "Numbers come straight from macOS: no extra programs, no scanning.",
-                    ),
-                    (
-                        icon::POWER,
-                        "Redraws only when a number changes, and pauses while the screen is off.",
-                    ),
-                    (
-                        icon::LOCK_SIMPLE,
-                        "Off until you turn it on. Turning it off removes it completely.",
-                    ),
-                ] {
-                    ui.horizontal(|ui| {
-                        ui.label(theme::text(glyph, 14.0).color(p.accent));
-                        ui.label(theme::text(line, 13.0));
-                    });
-                }
-                if let (true, Some((mem, cpu))) = (self.on, self.usage) {
-                    ui.add_space(6.0);
-                    ui.label(theme::dim(
-                        format!(
-                            "Right now: {:.1} MB of memory, {cpu:.1}% CPU. The menu also shows what it uses.",
-                            mem as f64 / 1e6
-                        ),
-                        12.5,
-                    ));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(theme::dim("Update", 12.5));
+                for (s, name) in [(1u32, "Live"), (2, "Every 2 s"), (5, "Every 5 s")] {
+                    let fill = if self.config.interval == s {
+                        Color32::from_white_alpha(70)
+                    } else {
+                        Color32::from_white_alpha(18)
+                    };
+                    if theme::pill(ui, name, fill).clicked() && self.config.interval != s {
+                        self.config.interval = s;
+                        self.save();
+                    }
                 }
             });
+            ui.add_space(6.0);
+            ui.label(theme::dim(
+                "A separate tiny helper: MacSweep doesn't stay open. Changes apply instantly; turning it off removes it completely.",
+                12.0,
+            ));
         });
     }
 }

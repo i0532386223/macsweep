@@ -1,0 +1,22 @@
+Power:
+
+    Battery Information:
+
+      Model Information:
+          Serial Number: REDACTED
+          Device Name: bq20z451
+          Pack Lot Code: 0x0000
+          PCB Lot Code: 0x0000
+          Firmware Version: 0x00001002
+          Hardware Revision: 0x0001
+          Cell Revision: 0x2735
+      Charge Information:
+          The battery’s charge is below the warning level: No
+          Fully Charged: No
+          Charging: No
+          State of Charge (%): 90
+      Health Information:
+          Cycle Count: 290
+          Condition: Normal
+          Maximum Capacity: 90%
+
