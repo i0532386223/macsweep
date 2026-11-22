@@ -36,7 +36,8 @@ mod mac {
     use objc2_app_kit::{
         NSApplication, NSApplicationActivationPolicy, NSFont, NSFontWeightRegular, NSMenu, NSMenuDelegate, NSMenuItem,
         NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSWorkspace, NSWorkspaceScreensDidSleepNotification,
-        NSWorkspaceScreensDidWakeNotification,
+        NSWorkspaceScreensDidWakeNotification, NSWorkspaceSessionDidBecomeActiveNotification,
+        NSWorkspaceSessionDidResignActiveNotification,
     };
     use objc2_foundation::{
         NSArray, NSNotification, NSNumber, NSObjectProtocol, NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer, NSURL,
@@ -228,12 +229,31 @@ mod mac {
             self.title.borrow_mut().clear(); // force the real text on the next redraw
         }
 
+        /// Nobody can see the menu bar (screen off, or another user's
+        /// session in front): stop the timer completely, so the Mac isn't
+        /// woken every second for nothing.
+        fn pause(&self) {
+            self.asleep.set(true);
+            if let Some(t) = self.timer.borrow_mut().take() {
+                t.invalidate();
+            }
+        }
+
+        fn resume(self: &Rc<Self>) {
+            if !self.asleep.replace(false) {
+                return;
+            }
+            self.disk_at.set(0.0); // refresh disk space at once
+            self.schedule();
+            self.tick();
+        }
+
         /// New settings from MacSweep: apply at once, no restart.
         fn reload(self: &Rc<Self>) {
             let old = self.config.get();
             let new = config();
             self.config.set(new);
-            if new.interval != old.interval {
+            if new.interval != old.interval && !self.asleep.get() {
                 self.schedule();
             }
             self.fix_width();
@@ -372,26 +392,21 @@ mod mac {
         let mut token = 0;
         unsafe { notify_register_dispatch(name.as_ptr(), &mut token, &_dispatch_main_q, &reload) };
 
-        // Pause while the displays sleep; catch up the moment they wake.
+        // Stop entirely while the displays sleep or another user's session is
+        // in front; catch up the moment the menu bar is visible again.
         let center = NSWorkspace::sharedWorkspace().notificationCenter();
-        let sleep = RcBlock::new(|_: NonNull<NSNotification>| with_monitor(|m| m.asleep.set(true)));
-        let wake = RcBlock::new(|_: NonNull<NSNotification>| {
-            with_monitor(|m| {
-                m.asleep.set(false);
-                m.disk_at.set(0.0);
-                m.tick();
-            })
-        });
-        let _observers = unsafe {
-            (
-                center.addObserverForName_object_queue_usingBlock(
-                    Some(NSWorkspaceScreensDidSleepNotification),
-                    None,
-                    None,
-                    &sleep,
-                ),
-                center.addObserverForName_object_queue_usingBlock(Some(NSWorkspaceScreensDidWakeNotification), None, None, &wake),
-            )
+        let pause = RcBlock::new(|_: NonNull<NSNotification>| with_monitor(|m| m.pause()));
+        let resume = RcBlock::new(|_: NonNull<NSNotification>| with_monitor(|m| m.resume()));
+        let _observers: Vec<_> = unsafe {
+            [
+                (NSWorkspaceScreensDidSleepNotification, &pause),
+                (NSWorkspaceSessionDidResignActiveNotification, &pause),
+                (NSWorkspaceScreensDidWakeNotification, &resume),
+                (NSWorkspaceSessionDidBecomeActiveNotification, &resume),
+            ]
+            .into_iter()
+            .map(|(name, block)| center.addObserverForName_object_queue_usingBlock(Some(name), None, None, block))
+            .collect()
         };
 
         app.run();
