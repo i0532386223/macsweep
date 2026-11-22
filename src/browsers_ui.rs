@@ -37,10 +37,10 @@ impl Sort {
     const ALL: [Sort; 4] = [Sort::Size, Sort::Profile, Sort::Name, Sort::Recent];
     fn label(self) -> &'static str {
         match self {
-            Sort::Size => "Largest first",
-            Sort::Profile => "By profile",
-            Sort::Name => "By name",
-            Sort::Recent => "Recently used",
+            Sort::Size => "Size",
+            Sort::Profile => "Profile",
+            Sort::Name => "Name",
+            Sort::Recent => "Recent",
         }
     }
 }
@@ -588,26 +588,21 @@ fn browser_logo(ui: &mut Ui, logo: Option<&TextureHandle>, p: Palette, size: f32
     }
 }
 
+fn pill_fill(on: bool) -> Color32 {
+    if on {
+        Color32::from_white_alpha(70)
+    } else {
+        Color32::from_white_alpha(18)
+    }
+}
+
 /// Profile chips, search and sort. Returns true if the view changed.
 fn controls(ui: &mut Ui, b: &Browser, view: &mut View) -> bool {
     let mut changed = false;
     if b.profiles.len() > 1 {
         ui.horizontal_wrapped(|ui| {
             ui.label(theme::dim("Profile", 12.0));
-            let chip = |ui: &mut Ui, label: &str, on: bool| {
-                let fill = if on {
-                    Color32::from_white_alpha(70)
-                } else {
-                    Color32::from_white_alpha(18)
-                };
-                ui.add(
-                    egui::Button::new(theme::semi(label, 12.0))
-                        .fill(fill)
-                        .corner_radius(10)
-                        .min_size(vec2(0.0, 24.0)),
-                )
-                .clicked()
-            };
+            let chip = |ui: &mut Ui, label: &str, on: bool| theme::pill(ui, label, pill_fill(on)).clicked();
             if chip(ui, "All profiles", view.profile.is_none()) {
                 view.profile = None;
                 changed = true;
@@ -623,24 +618,23 @@ fn controls(ui: &mut Ui, b: &Browser, view: &mut View) -> bool {
     ui.horizontal(|ui| {
         let search = egui::TextEdit::singleline(&mut view.query)
             .hint_text(format!("{}  Search websites", icon::MAGNIFYING_GLASS))
-            .desired_width(240.0);
+            .desired_width(240.0)
+            .margin(vec2(10.0, 6.0));
         if ui.add(search).changed() {
             changed = true;
         }
-        if !view.query.is_empty() && ui.small_button("Clear").clicked() {
+        if !view.query.is_empty() && theme::pill(ui, "Clear", pill_fill(false)).clicked() {
             view.query.clear();
             changed = true;
         }
+        // Same pills as the Uninstaller's sort, right-aligned.
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            egui::ComboBox::from_id_salt("browser_sort")
-                .selected_text(view.sort.label())
-                .width(140.0)
-                .show_ui(ui, |ui| {
-                    for s in Sort::ALL {
-                        ui.selectable_value(&mut view.sort, s, s.label());
-                    }
-                });
-            ui.label(theme::dim("Sort", 12.0));
+            for s in Sort::ALL.into_iter().rev() {
+                if theme::pill(ui, s.label(), pill_fill(view.sort == s)).clicked() {
+                    view.sort = s;
+                }
+            }
+            ui.label(theme::dim("Sort", 12.5));
         });
     });
     changed
