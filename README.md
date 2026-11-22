@@ -52,6 +52,10 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 <td><img src="docs/system-junk.jpg" alt="System Junk"></td>
 <td><img src="docs/cleaned.jpg" alt="Cleaned"></td>
 </tr>
+<tr>
+<td><img src="docs/browser-cleanup.jpg" alt="Browser Cleanup: AI models, website data and cache per browser and profile"></td>
+<td><img src="docs/mac-health.jpg" alt="Mac Health: battery capacity, condition and SSD health"></td>
+</tr>
 </table>
 
 ## How MacSweep compares

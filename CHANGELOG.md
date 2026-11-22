@@ -43,7 +43,8 @@ See what each browser keeps on your Mac, sorted into three groups, and choose ex
 
 **Validated** on a MacBook Air M1 (macOS 27.3) with 5 Chrome profiles and Brave:
 - Chrome names website folders by code (`6c531fa0…`, `018`). MacSweep traced every one back to its website from Chrome's own indexes; none was left unnamed. The largest, 3.8 GB, was **web.nfsmwo.com**, a browser game, whose saves a blind "clear cache" would have deleted. Other web games found: nfsu2.xyz, a crazygames.com game, dos.zone.
-- AI models found: 208.7 MB (scam detection model, small feature models, address-bar suggestions). Gemini Nano was not downloaded on this Mac. Turning off On-device AI in Chrome's settings made Chrome delete all of them itself, as Google documents.
+- AI models found: 208.7 MB (scam detection model, small feature models, address-bar suggestions). Gemini Nano was not downloaded on this Mac. Turning off On-device AI in Chrome's settings made Chrome delete its scam detection model itself; the small feature models and the address-bar model stayed, because that setting doesn't cover them. MacSweep lists what's left after the change.
+- A real clean of website data and cache in Brave left Brave and the cleaned sites working normally.
 - `MacSweep --browser-report` prints everything the scan finds, with every path, so you can check it on your own Mac. It changes nothing.
 
 ### New: update notice

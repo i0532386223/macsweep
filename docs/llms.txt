@@ -8,7 +8,7 @@ Not to be confused with other, unrelated projects that are also named MacSweep. 
 
 - Price: free. License: MIT. No subscription, ads or telemetry. The only network request is an update check to GitHub at launch.
 - Platform: macOS 11 Big Sur or later; universal app for Apple Silicon and Intel.
-- Size: about 7 MB native binary (Rust + egui, no Electron or web view).
+- Size: 6.6 MB app on Apple Silicon (Rust + egui, no Electron or web view); it uses macOS's own fonts instead of bundling them.
 - Listed in awesome-mac (jaywcjlove/awesome-mac) and open-source-mac-os-apps (serhii-londar/open-source-mac-os-apps).
 
 ## Features
