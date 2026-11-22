@@ -455,6 +455,18 @@ mod mac {
         None
     }
 
+    /// `mach_timebase_info_data_t` from <mach/mach_time.h> (declared here:
+    /// the libc crate's copy is deprecated).
+    #[repr(C)]
+    struct Timebase {
+        numer: u32,
+        denom: u32,
+    }
+
+    unsafe extern "C" {
+        fn mach_timebase_info(info: *mut Timebase) -> i32;
+    }
+
     /// Total CPU time of a process in nanoseconds.
     fn cpu_ns(pid: i32) -> Option<u64> {
         let mut t: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
@@ -472,8 +484,8 @@ mod mac {
             return None;
         }
         // Reported in Mach time units (not nanoseconds on Apple silicon).
-        let mut tb = libc::mach_timebase_info { numer: 0, denom: 0 };
-        unsafe { libc::mach_timebase_info(&mut tb) };
+        let mut tb = Timebase { numer: 0, denom: 0 };
+        unsafe { mach_timebase_info(&mut tb) };
         let ticks = u128::from(t.pti_total_user + t.pti_total_system);
         (tb.denom != 0).then(|| (ticks * u128::from(tb.numer) / u128::from(tb.denom)) as u64)
     }
