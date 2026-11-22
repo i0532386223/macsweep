@@ -84,8 +84,23 @@ fn login_item(exe: &std::path::Path) -> plist::Value {
     plist::Value::Dictionary(d)
 }
 
+/// A login item must point at a copy of MacSweep that will still be there
+/// after a restart. Apps opened from Downloads are run by macOS from a hidden
+/// temporary folder ("App Translocation"), and disk images get unmounted.
+fn install_problem(exe: &std::path::Path) -> Option<&'static str> {
+    let p = exe.to_string_lossy();
+    if p.contains("/AppTranslocation/") || p.starts_with("/Volumes/") || p.starts_with("/private/var/folders/") {
+        Some("Move MacSweep to your Applications folder and open it from there, then turn the monitor on.")
+    } else {
+        None
+    }
+}
+
 fn turn_on() -> Result<(), String> {
     let exe = helper_exe().ok_or("The monitor isn't included in this copy of MacSweep. Install the latest release.")?;
+    if let Some(problem) = install_problem(&exe) {
+        return Err(problem.into());
+    }
     let path = plist_path();
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -157,6 +172,9 @@ pub fn repair_on_launch() {
         return;
     }
     let Some(exe) = helper_exe() else { return };
+    if install_problem(&exe).is_some() {
+        return; // never point the login item at a temporary copy
+    }
     let current = plist::Value::from_file(plist_path()).ok().and_then(|v| {
         v.as_dictionary()?
             .get("ProgramArguments")?
@@ -412,6 +430,18 @@ mod tests {
         assert_eq!(Config::parse(&c.render()), c);
         assert_eq!(c.preview(), "RAM 61%  120 GB");
         assert_eq!(Config::parse("").preview(), "CPU 12%  RAM 61%  120 GB");
+    }
+
+    #[test]
+    fn temporary_copies_are_refused() {
+        let ok = std::path::Path::new("/Applications/MacSweep.app/Contents/Library/LoginItems/x");
+        assert!(install_problem(ok).is_none());
+        for bad in [
+            "/private/var/folders/ab/T/AppTranslocation/1234/d/MacSweep.app/Contents/x",
+            "/Volumes/MacSweep/MacSweep.app/Contents/x",
+        ] {
+            assert!(install_problem(std::path::Path::new(bad)).is_some(), "{bad}");
+        }
     }
 
     #[test]
