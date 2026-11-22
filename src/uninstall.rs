@@ -459,7 +459,7 @@ fn load_icon(app: &Path, icon_file: Option<&str>) -> Option<ColorImage> {
 fn system_icon(app: &Path) -> Option<ColorImage> {
     let dir = std::env::temp_dir().join(format!("macsweep-icons-{}", std::process::id()));
     std::fs::create_dir_all(&dir).ok()?;
-    Command::new("qlmanage")
+    Command::new("/usr/bin/qlmanage")
         .args(["-t", "-s", "128", "-o"])
         .arg(&dir)
         .arg(app)
@@ -523,7 +523,7 @@ fn downscale(src: &[u8], w: usize, h: usize) -> ColorImage {
 }
 
 fn last_opened(app: &Path) -> String {
-    let out = Command::new("mdls")
+    let out = Command::new("/usr/bin/mdls")
         .args(["-raw", "-name", "kMDItemLastUsedDate"])
         .arg(app)
         .output();
@@ -538,7 +538,7 @@ fn last_opened(app: &Path) -> String {
 }
 
 fn osascript(script: &str) -> String {
-    Command::new("osascript")
+    Command::new("/usr/bin/osascript")
         .args(["-e", script])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -567,7 +567,7 @@ fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
         let agents = fsutil::home().join("Library/LaunchAgents");
         let uid = unsafe { libc::getuid() };
         for l in a.leftovers.iter().filter(|l| l.selected && l.path.starts_with(&agents)) {
-            let _ = Command::new("launchctl")
+            let _ = Command::new("/bin/launchctl")
                 .args(["bootout", &format!("gui/{uid}")])
                 .arg(&l.path)
                 .stdout(std::process::Stdio::null())

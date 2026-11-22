@@ -55,7 +55,7 @@ fn uid() -> u32 {
 }
 
 fn launchctl(args: &[&str]) -> bool {
-    Command::new("launchctl")
+    Command::new("/bin/launchctl")
         .args(args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

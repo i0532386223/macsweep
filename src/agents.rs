@@ -55,7 +55,7 @@ fn remove(targets: Vec<(PathBuf, bool)>) -> String {
     let uid = unsafe { libc::getuid() };
     for (p, is_user) in &targets {
         if *is_user {
-            let _ = Command::new("launchctl")
+            let _ = Command::new("/bin/launchctl")
                 .args(["bootout", &format!("gui/{uid}")])
                 .arg(p)
                 .status();

@@ -304,7 +304,7 @@ mod mac {
                 let plist = home().join(format!("Library/LaunchAgents/{LABEL}.plist"));
                 let _ = std::fs::remove_file(&plist);
                 // Tell launchd to forget us, without waiting for the answer.
-                let _ = std::process::Command::new("launchctl")
+                let _ = std::process::Command::new("/bin/launchctl")
                     .args(["remove", LABEL])
                     .spawn();
                 std::process::exit(0);

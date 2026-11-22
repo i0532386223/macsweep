@@ -17,7 +17,7 @@ pub struct Item {
 /// Bundle IDs and names of the apps running now (lower case), from
 /// `lsappinfo`, which needs no extra permission.
 fn running_apps() -> Vec<String> {
-    let out = std::process::Command::new("lsappinfo")
+    let out = std::process::Command::new("/usr/bin/lsappinfo")
         .arg("list")
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())

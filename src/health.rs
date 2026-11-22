@@ -261,10 +261,10 @@ pub fn system_now() -> System {
 
 pub fn collect() -> Health {
     // One system_profiler run for both reports: it's the slow part (~1 s each).
-    let profile = run("system_profiler", &["SPPowerDataType", "SPNVMeDataType"])
+    let profile = run("/usr/sbin/system_profiler", &["SPPowerDataType", "SPNVMeDataType"])
         .map(|t| String::from_utf8_lossy(&t).into_owned())
         .unwrap_or_default();
-    let battery = run("ioreg", &["-rn", "AppleSmartBattery", "-a"])
+    let battery = run("/usr/sbin/ioreg", &["-rn", "AppleSmartBattery", "-a"])
         .and_then(|x| parse_ioreg_battery(&x))
         .map(|mut b| {
             if let Some(power) = section(&profile, "Power:") {
