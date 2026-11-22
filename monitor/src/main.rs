@@ -313,9 +313,11 @@ mod mac {
         }
     }
 
+    /// A line of information. Enabled (with no action) so it reads in normal
+    /// text like Apple's own status menus, instead of greyed out.
     fn info_item(mtm: MainThreadMarker, menu: &NSMenu) -> Retained<NSMenuItem> {
         let item = NSMenuItem::new(mtm);
-        item.setEnabled(false);
+        item.setEnabled(true);
         item.setTitle(ns_string!("…"));
         menu.addItem(&item);
         item
