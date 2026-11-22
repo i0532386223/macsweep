@@ -70,7 +70,7 @@ pub fn fmt_bytes(b: u64) -> String {
     }
 }
 
-/// The menu-bar text, e.g. "CPU 12%  RAM 61%  120 GB".
+/// The menu-bar text, e.g. "CPU 12%  RAM 61%  120 GB free".
 pub fn title(c: &Config, cpu: f64, ram_used: u64, ram_total: u64, disk_free: Option<u64>, p: Pressure) -> String {
     let mut parts = Vec::new();
     if c.cpu {
@@ -87,7 +87,7 @@ pub fn title(c: &Config, cpu: f64, ram_used: u64, ram_total: u64, disk_free: Opt
     }
     if c.disk {
         if let Some(f) = disk_free {
-            parts.push(fmt_bytes(f));
+            parts.push(format!("{} free", fmt_bytes(f)));
         }
     }
     if parts.is_empty() {
@@ -301,7 +301,7 @@ mod tests {
             Some(120_000_000_000),
             Pressure::Normal,
         );
-        assert_eq!(t, "CPU 12%  RAM 50%  120 GB");
+        assert_eq!(t, "CPU 12%  RAM 50%  120 GB free");
         let t = title(&all, 3.0, 15_000_000_000, 16_000_000_000, None, Pressure::Warning);
         assert_eq!(t, "CPU 3%  RAM 94% ⚠︎");
         let none = Config {

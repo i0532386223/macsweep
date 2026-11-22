@@ -29,7 +29,7 @@ impl Preview for Config {
             v.push("RAM 61%");
         }
         if self.disk {
-            v.push("120 GB");
+            v.push("120 GB free");
         }
         if v.is_empty() { "MacSweep".into() } else { v.join("  ") }
     }
@@ -428,8 +428,8 @@ mod tests {
             interval: 10,
         };
         assert_eq!(Config::parse(&c.render()), c);
-        assert_eq!(c.preview(), "RAM 61%  120 GB");
-        assert_eq!(Config::parse("").preview(), "CPU 12%  RAM 61%  120 GB");
+        assert_eq!(c.preview(), "RAM 61%  120 GB free");
+        assert_eq!(Config::parse("").preview(), "CPU 12%  RAM 61%  120 GB free");
     }
 
     #[test]
