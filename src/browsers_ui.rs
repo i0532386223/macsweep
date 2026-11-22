@@ -467,9 +467,11 @@ impl BrowsersPane {
                 ui.label(
                     theme::dim(
                         format!(
-                            "{}  {} is open. Quit it to clean: a browser can damage files that change while it runs.",
+                            "{}  {name} is open. Quit it with ⌘Q to clean: a browser can damage files that change \
+                             while it runs. If {name} has no windows but is still open, turn off \"Continue running \
+                             background apps\" in its settings.",
                             icon::WARNING,
-                            b.name
+                            name = b.name
                         ),
                         12.5,
                     )
@@ -549,7 +551,7 @@ impl BrowsersPane {
             self.confirm = true;
         }
         let line = if running {
-            format!("Quit {name} to clean it")
+            format!("Quit {name} with ⌘Q to clean it")
         } else {
             let mut v = Vec::new();
             if deleted > 0 {
