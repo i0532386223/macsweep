@@ -34,14 +34,15 @@ mod mac {
     use objc2::runtime::{AnyObject, NSObject, ProtocolObject};
     use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::{
-        NSApplication, NSApplicationActivationPolicy, NSFont, NSFontWeightRegular, NSMenu, NSMenuDelegate, NSMenuItem,
-        NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSWorkspace, NSWorkspaceScreensDidSleepNotification,
-        NSWorkspaceScreensDidWakeNotification, NSWorkspaceSessionDidBecomeActiveNotification,
-        NSWorkspaceSessionDidResignActiveNotification,
+        NSApplication, NSApplicationActivationPolicy, NSBox, NSBoxType, NSColor, NSFont, NSFontWeightMedium, NSFontWeightRegular,
+        NSFontWeightSemibold, NSImage, NSImageSymbolConfiguration, NSImageView, NSLineBreakMode, NSMenu, NSMenuDelegate,
+        NSMenuItem, NSStatusBar, NSStatusItem, NSTextAlignment, NSTextField, NSTitlePosition, NSVariableStatusItemLength, NSView,
+        NSWorkspace, NSWorkspaceScreensDidSleepNotification, NSWorkspaceScreensDidWakeNotification,
+        NSWorkspaceSessionDidBecomeActiveNotification, NSWorkspaceSessionDidResignActiveNotification,
     };
     use objc2_foundation::{
-        NSArray, NSNotification, NSNumber, NSObjectProtocol, NSRunLoop, NSRunLoopCommonModes, NSString, NSTimer, NSURL,
-        NSURLVolumeAvailableCapacityForImportantUsageKey, ns_string,
+        NSArray, NSNotification, NSNumber, NSObjectProtocol, NSPoint, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString,
+        NSTimer, NSURL, NSURLVolumeAvailableCapacityForImportantUsageKey, ns_string,
     };
     use std::cell::{Cell, RefCell};
     use std::ffi::{CString, c_char, c_void};
@@ -49,7 +50,7 @@ mod mac {
     use std::ptr::NonNull;
     use std::rc::Rc;
 
-    use crate::shared::{CONF, LABEL, RELOAD, fmt_mem};
+    use crate::shared::{CONF, LABEL, RELOAD};
 
     unsafe extern "C" {
         static _dispatch_main_q: c_void;
@@ -100,14 +101,14 @@ mod mac {
     struct Monitor {
         mtm: MainThreadMarker,
         item: Retained<NSStatusItem>,
-        cpu_line: Retained<NSMenuItem>,
-        ram_line: Retained<NSMenuItem>,
-        pressure_line: Retained<NSMenuItem>,
-        disk_line: Retained<NSMenuItem>,
-        own_line: Retained<NSMenuItem>,
+        cpu_row: Row,
+        ram_row: Row,
+        disk_row: Row,
+        footer: Retained<NSTextField>,
         sampler: RefCell<Sampler>,
         config: Cell<Config>,
         disk: Cell<Option<u64>>,
+        disk_size: Cell<Option<u64>>,
         disk_at: Cell<f64>,
         cpu: Cell<f64>,
         title: RefCell<String>,
@@ -161,32 +162,47 @@ mod mac {
                 *self.title.borrow_mut() = title;
             }
             if self.menu_open.get() {
-                let set = |item: &NSMenuItem, t: String| item.setTitle(&NSString::from_str(&t));
-                set(&self.cpu_line, format!("CPU: {:.0}%", self.cpu.get()));
-                set(
-                    &self.ram_line,
-                    // Same units as Activity Monitor and Mac Health (8.00 GB, not "9 GB").
-                    format!("Memory: {} of {} used", fmt_mem(used), fmt_mem(total)),
+                self.cpu_row
+                    .show(&format!("{:.0}%", self.cpu.get()), self.cpu.get() / 100.0, None);
+
+                // Same units as Activity Monitor and Mac Health (8.00 GB, not "9 GB").
+                let gb = |b: u64| b as f64 / 1_073_741_824.0;
+                let tint = match p {
+                    stats::Pressure::Normal => None,
+                    stats::Pressure::Warning => Some(NSColor::systemOrangeColor()),
+                    stats::Pressure::Critical => Some(NSColor::systemRedColor()),
+                };
+                self.ram_row.show(
+                    &format!("{:.2} of {:.2} GB", gb(used), gb(total)),
+                    if total > 0 { used as f64 / total as f64 } else { 0.0 },
+                    tint.as_deref(),
                 );
-                set(&self.pressure_line, format!("Memory pressure: {}", p.label()));
-                set(
-                    &self.disk_line,
-                    match self.disk.get() {
-                        Some(f) => format!("Disk: {} available", stats::fmt_bytes(f)),
-                        None => "Disk: unknown".into(),
-                    },
-                );
-                set(
-                    &self.own_line,
-                    format!(
-                        "This monitor: {:.1} MB · {}",
-                        stats::own_memory() as f64 / 1e6,
-                        match self.config.get().interval {
-                            1 => "updates live".to_string(),
-                            n => format!("updates every {n} s"),
-                        }
-                    ),
-                );
+                if let Some(c) = &self.ram_row.caption {
+                    c.setStringValue(&NSString::from_str(&format!("Memory pressure: {}", p.label())));
+                    let color = tint.clone().unwrap_or_else(NSColor::secondaryLabelColor);
+                    c.setTextColor(Some(&color));
+                }
+
+                match (self.disk.get(), self.disk_size.get()) {
+                    (Some(free), Some(size)) if size > 0 => {
+                        let used = 1.0 - free as f64 / size as f64;
+                        // Orange once less than a tenth of the disk is free.
+                        let low = (used > 0.9).then(NSColor::systemOrangeColor);
+                        self.disk_row
+                            .show(&format!("{} free", stats::fmt_bytes(free)), used, low.as_deref());
+                    }
+                    (Some(free), _) => self.disk_row.show(&format!("{} free", stats::fmt_bytes(free)), 0.0, None),
+                    _ => self.disk_row.show("Unknown", 0.0, None),
+                }
+
+                self.footer.setStringValue(&NSString::from_str(&format!(
+                    "This monitor uses {:.1} MB · {}",
+                    stats::own_memory() as f64 / 1e6,
+                    match self.config.get().interval {
+                        1 => "updates live".to_string(),
+                        n => format!("updates every {n} s"),
+                    }
+                )));
             }
         }
 
@@ -318,14 +334,126 @@ mod mac {
         }
     }
 
-    /// A line of information. Enabled (with no action) so it reads in normal
-    /// text like Apple's own status menus, instead of greyed out.
-    fn info_item(mtm: MainThreadMarker, menu: &NSMenu) -> Retained<NSMenuItem> {
+    // ----- The menu's information rows -----
+    //
+    // Plain views inside menu items, laid out like Control Center: an icon,
+    // the name on the left, the value on the right, a thin bar underneath.
+    // Views never highlight on hover, so they don't look like buttons.
+    // Coordinates start at the bottom left, as AppKit's do.
+
+    const WIDTH: f64 = 280.0;
+    const SIDE: f64 = 14.0; // left and right margin
+    const TEXT_X: f64 = 40.0; // where names and bars start, after the icon
+    const BAR_W: f64 = WIDTH - TEXT_X - SIDE;
+
+    fn rect(x: f64, y: f64, w: f64, h: f64) -> NSRect {
+        NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))
+    }
+
+    fn label(mtm: MainThreadMarker, text: &str, font: &NSFont, color: &NSColor, frame: NSRect) -> Retained<NSTextField> {
+        let l = NSTextField::labelWithString(&NSString::from_str(text), mtm);
+        l.setFont(Some(font));
+        l.setTextColor(Some(color));
+        l.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
+        l.setFrame(frame);
+        l
+    }
+
+    /// A filled, rounded rectangle (used for the bars).
+    fn pill(mtm: MainThreadMarker, color: &NSColor, frame: NSRect) -> Retained<NSBox> {
+        let b = NSBox::initWithFrame(NSBox::alloc(mtm), frame);
+        b.setBoxType(NSBoxType::Custom);
+        b.setTitlePosition(NSTitlePosition::NoTitle);
+        b.setBorderWidth(0.0);
+        b.setCornerRadius(frame.size.height / 2.0);
+        b.setFillColor(color);
+        b.setContentViewMargins(NSSize::new(0.0, 0.0));
+        b
+    }
+
+    /// A menu item that shows a view instead of a title.
+    fn view_item(mtm: MainThreadMarker, menu: &NSMenu, height: f64) -> Retained<NSView> {
+        let view = NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, WIDTH, height));
         let item = NSMenuItem::new(mtm);
-        item.setEnabled(true);
-        item.setTitle(ns_string!("…"));
+        item.setView(Some(&view));
         menu.addItem(&item);
-        item
+        view
+    }
+
+    /// One measure: icon, name, value, bar, and an optional caption below.
+    struct Row {
+        value: Retained<NSTextField>,
+        fill: Retained<NSBox>,
+        caption: Option<Retained<NSTextField>>,
+    }
+
+    impl Row {
+        fn new(mtm: MainThreadMarker, menu: &NSMenu, symbol: &str, name: &str, with_caption: bool) -> Self {
+            let extra = if with_caption { 18.0 } else { 0.0 };
+            let view = view_item(mtm, menu, 46.0 + extra);
+            let text_y = 22.0 + extra;
+
+            // System icons (SF Symbols); skipped if this macOS lacks one.
+            if let Some(img) = NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(symbol), None) {
+                let icon = NSImageView::imageViewWithImage(&img, mtm);
+                let config = NSImageSymbolConfiguration::configurationWithPointSize_weight(14.0, unsafe { NSFontWeightRegular });
+                icon.setSymbolConfiguration(Some(&config));
+                icon.setContentTintColor(Some(&NSColor::secondaryLabelColor()));
+                icon.setFrame(rect(SIDE - 1.0, text_y - 1.0, 20.0, 20.0));
+                view.addSubview(&icon);
+            }
+
+            let name_font = NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium });
+            view.addSubview(&label(
+                mtm,
+                name,
+                &name_font,
+                &NSColor::labelColor(),
+                rect(TEXT_X, text_y, 90.0, 17.0),
+            ));
+
+            // Digits of equal width, so values don't jiggle as they change.
+            let value_font = NSFont::monospacedDigitSystemFontOfSize_weight(13.0, unsafe { NSFontWeightRegular });
+            let value = label(
+                mtm,
+                "…",
+                &value_font,
+                &NSColor::secondaryLabelColor(),
+                rect(WIDTH - SIDE - 150.0, text_y, 150.0, 17.0),
+            );
+            value.setAlignment(NSTextAlignment::Right);
+            view.addSubview(&value);
+
+            let bar_y = 12.0 + extra;
+            view.addSubview(&pill(mtm, &NSColor::quaternaryLabelColor(), rect(TEXT_X, bar_y, BAR_W, 4.0)));
+            let fill = pill(mtm, &NSColor::controlAccentColor(), rect(TEXT_X, bar_y, 0.0, 4.0));
+            view.addSubview(&fill);
+
+            let caption = with_caption.then(|| {
+                let font = NSFont::systemFontOfSize_weight(11.0, unsafe { NSFontWeightRegular });
+                let c = label(
+                    mtm,
+                    "",
+                    &font,
+                    &NSColor::secondaryLabelColor(),
+                    rect(TEXT_X, 8.0, BAR_W, 14.0),
+                );
+                view.addSubview(&c);
+                c
+            });
+            Row { value, fill, caption }
+        }
+
+        /// New value; `share` is how full the bar is (0–1). The bar uses the
+        /// Mac's accent colour unless `tint` gives a warning colour.
+        fn show(&self, value: &str, share: f64, tint: Option<&NSColor>) {
+            self.value.setStringValue(&NSString::from_str(value));
+            let mut f = self.fill.frame();
+            f.size.width = (share.clamp(0.0, 1.0) * BAR_W).round();
+            self.fill.setFrame(f);
+            let accent = NSColor::controlAccentColor();
+            self.fill.setFillColor(tint.unwrap_or(&accent));
+        }
     }
 
     fn action_item(mtm: MainThreadMarker, menu: &NSMenu, title: &str, action: objc2::runtime::Sel, target: &Actions) {
@@ -360,16 +488,29 @@ mod mac {
         menu.setAutoenablesItems(false);
         menu.setDelegate(Some(ProtocolObject::from_ref(&*actions)));
         // Header, so it's clear which app this menu belongs to.
-        let header = NSMenuItem::new(mtm);
-        header.setTitle(ns_string!("MacSweep Monitor"));
-        header.setEnabled(false);
-        menu.addItem(&header);
-        let cpu_line = info_item(mtm, &menu);
-        let ram_line = info_item(mtm, &menu);
-        let pressure_line = info_item(mtm, &menu);
-        let disk_line = info_item(mtm, &menu);
+        let header = view_item(mtm, &menu, 26.0);
+        let header_font = NSFont::systemFontOfSize_weight(12.0, unsafe { NSFontWeightSemibold });
+        header.addSubview(&label(
+            mtm,
+            "MacSweep Monitor",
+            &header_font,
+            &NSColor::secondaryLabelColor(),
+            rect(SIDE, 4.0, WIDTH - 2.0 * SIDE, 16.0),
+        ));
+        let cpu_row = Row::new(mtm, &menu, "cpu", "CPU", false);
+        let ram_row = Row::new(mtm, &menu, "memorychip", "Memory", true);
+        let disk_row = Row::new(mtm, &menu, "internaldrive", "Disk", false);
         menu.addItem(&NSMenuItem::separatorItem(mtm));
-        let own_line = info_item(mtm, &menu);
+        let footer_view = view_item(mtm, &menu, 22.0);
+        let footer_font = NSFont::systemFontOfSize_weight(11.0, unsafe { NSFontWeightRegular });
+        let footer = label(
+            mtm,
+            "",
+            &footer_font,
+            &NSColor::tertiaryLabelColor(),
+            rect(SIDE, 4.0, WIDTH - 2.0 * SIDE, 14.0),
+        );
+        footer_view.addSubview(&footer);
         menu.addItem(&NSMenuItem::separatorItem(mtm));
         action_item(mtm, &menu, "Open MacSweep", sel!(openMacSweep:), &actions);
         action_item(mtm, &menu, "Turn Off Menu Bar Monitor", sel!(turnOff:), &actions);
@@ -378,14 +519,14 @@ mod mac {
         let m = Rc::new(Monitor {
             mtm,
             item,
-            cpu_line,
-            ram_line,
-            pressure_line,
-            disk_line,
-            own_line,
+            cpu_row,
+            ram_row,
+            disk_row,
+            footer,
             sampler: RefCell::new(Sampler::new()),
             config: Cell::new(config()),
             disk: Cell::new(disk_free()),
+            disk_size: Cell::new(stats::disk_total()),
             disk_at: Cell::new(now()),
             cpu: Cell::new(0.0),
             title: RefCell::new(String::new()),

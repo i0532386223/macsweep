@@ -20,9 +20,9 @@ impl Pressure {
     }
     pub fn label(self) -> &'static str {
         match self {
-            Self::Normal => "🟢 Normal",
-            Self::Warning => "🟡 High",
-            Self::Critical => "🔴 Critical",
+            Self::Normal => "Normal",
+            Self::Warning => "High",
+            Self::Critical => "Critical",
         }
     }
 }
@@ -216,6 +216,13 @@ mod mac {
         let mut s: libc::statfs = unsafe { std::mem::zeroed() };
         let root = CString::new("/").ok()?;
         (unsafe { libc::statfs(root.as_ptr(), &mut s) } == 0).then(|| s.f_bavail * u64::from(s.f_bsize))
+    }
+
+    /// Size of the startup disk, as Finder's "Capacity".
+    pub fn disk_total() -> Option<u64> {
+        let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+        let root = CString::new("/").ok()?;
+        (unsafe { libc::statfs(root.as_ptr(), &mut s) } == 0).then(|| s.f_blocks * u64::from(s.f_bsize))
     }
 
     /// `struct rusage_info_v0` from <sys/resource.h>.
