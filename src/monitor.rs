@@ -96,10 +96,38 @@ fn turn_on() -> Result<(), String> {
     let domain = format!("gui/{}", uid());
     let _ = launchctl(&["bootout", &format!("{domain}/{LABEL}")]);
     if launchctl(&["bootstrap", &domain, &path.to_string_lossy()]) {
+        remember_version();
         Ok(())
     } else {
         let _ = std::fs::remove_file(&path);
         Err("macOS didn't start the monitor. Try again, or check System Settings › General › Login Items.".into())
+    }
+}
+
+/// Records which MacSweep version started the monitor.
+fn version_path() -> PathBuf {
+    conf_path().with_file_name("monitor.version")
+}
+
+fn remember_version() {
+    let _ = std::fs::write(version_path(), env!("CARGO_PKG_VERSION"));
+}
+
+/// The running monitor is older than the helper inside this MacSweep: the
+/// app was updated (new version), or rebuilt/re-copied after it started.
+fn running_is_outdated(exe: &std::path::Path) -> bool {
+    let recorded = std::fs::read_to_string(version_path()).unwrap_or_default();
+    if recorded.trim() != env!("CARGO_PKG_VERSION") {
+        return true;
+    }
+    let changed = std::fs::metadata(exe)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs());
+    match (crate::health::find_process("macsweep-monitor"), changed) {
+        (Some(p), Some(c)) => c > p.started,
+        _ => false,
     }
 }
 
@@ -122,7 +150,8 @@ fn notify_monitor() {
     }
 }
 
-/// If MacSweep was moved or updated, point the login item at this copy.
+/// If MacSweep was moved or updated, point the login item at this copy and
+/// restart the monitor, so it never keeps running an old version until logout.
 pub fn repair_on_launch() {
     if !is_on() {
         return;
@@ -138,6 +167,10 @@ pub fn repair_on_launch() {
     });
     if current.as_deref() != Some(exe.as_path()) {
         let _ = turn_on();
+    } else if running_is_outdated(&exe) {
+        // Already in the background: restarting it here never blocks the UI.
+        let _ = launchctl(&["kickstart", "-k", &format!("gui/{}/{LABEL}", uid())]);
+        remember_version();
     }
 }
 
