@@ -141,13 +141,26 @@ pub fn repair_on_launch() {
     }
 }
 
-/// (memory bytes, CPU %) of the running helper, measured from outside.
-fn usage() -> Option<(u64, f32)> {
-    let pid = String::from_utf8(Command::new("pgrep").args(["-x", "macsweep-monitor"]).output().ok()?.stdout).ok()?;
-    let pid = pid.lines().next()?.trim().to_string();
-    let out = String::from_utf8(Command::new("ps").args(["-o", "%cpu=", "-p", &pid]).output().ok()?.stdout).ok()?;
-    let cpu: f32 = out.trim().parse().ok()?;
-    Some((footprint(pid.parse().ok()?)?, cpu))
+/// What a poll of the helper finds, measured from outside without starting
+/// any programs.
+#[derive(Clone, Copy)]
+struct Probe {
+    /// Its login item exists (it is switched on).
+    on: bool,
+    running: Option<crate::health::Proc>,
+    /// Memory as Activity Monitor counts it.
+    memory: Option<u64>,
+    at: std::time::Instant,
+}
+
+fn probe() -> Probe {
+    let running = crate::health::find_process("macsweep-monitor");
+    Probe {
+        on: is_on(),
+        memory: running.and_then(|p| footprint(p.pid)),
+        running,
+        at: std::time::Instant::now(),
+    }
 }
 
 /// Activity Monitor's memory figure for a process (see stats.rs).
@@ -161,14 +174,25 @@ fn footprint(_pid: i32) -> Option<u64> {
     None
 }
 
+/// CPU % between two probes of the same process.
+fn cpu_between(a: &Probe, b: &Probe) -> Option<f32> {
+    let (pa, pb) = (a.running?, b.running?);
+    let wall = b.at.duration_since(a.at).as_nanos() as f64;
+    (pa.pid == pb.pid && wall > 0.0).then(|| (pb.cpu_ns.saturating_sub(pa.cpu_ns) as f64 / wall * 100.0) as f32)
+}
+
 pub struct Monitor {
     config: Config,
     on: bool,
     /// Turning on/off talks to launchd, which can take a moment: off the UI thread.
     switching: Option<Job<Result<bool, String>>>,
-    usage: Option<(u64, f32)>,
-    usage_job: Option<Job<Option<(u64, f32)>>>,
-    usage_at: f64,
+    /// The last two polls of the helper (CPU % comes from their difference).
+    last: Option<Probe>,
+    prev: Option<Probe>,
+    probe_job: Option<Job<Probe>>,
+    probe_at: f64,
+    /// When it was last turned on here (to allow a few seconds to start).
+    on_since: f64,
     error: Option<String>,
 }
 
@@ -178,9 +202,11 @@ impl Default for Monitor {
             config: Config::parse(&std::fs::read_to_string(conf_path()).unwrap_or_default()),
             on: is_on(),
             switching: None,
-            usage: None,
-            usage_job: None,
-            usage_at: -100.0,
+            last: None,
+            prev: None,
+            probe_job: None,
+            probe_at: -100.0,
+            on_since: -100.0,
             error: None,
         }
     }
@@ -202,20 +228,32 @@ impl Monitor {
     pub fn card(&mut self, ui: &mut Ui, p: Palette) {
         let ctx = ui.ctx().clone();
         let now = ctx.input(|i| i.time);
-        // Measure the helper every few seconds, only while this screen is open.
-        if self.on && self.usage_job.is_none() && now - self.usage_at > 3.0 {
-            self.usage_at = now;
-            self.usage_job = Some(Job::spawn(&ctx, |_, _| usage()));
+        // Look at the helper every few seconds, only while this screen is open.
+        // Reads kernel data directly: no programs are started.
+        if self.probe_job.is_none() && now - self.probe_at > 3.0 {
+            self.probe_at = now;
+            self.probe_job = Some(Job::spawn(&ctx, |_, _| probe()));
         }
-        if let Some(u) = job::poll(&mut self.usage_job, &ctx) {
-            self.usage = u;
+        if let Some(pr) = job::poll(&mut self.probe_job, &ctx) {
+            // The helper's own menu can turn it off while MacSweep is open.
+            if self.switching.is_none() {
+                self.on = pr.on;
+            }
+            self.prev = self.last.replace(pr);
         }
+        let running = self.last.is_some_and(|p| p.running.is_some());
+        let usage = match (&self.prev, &self.last) {
+            (Some(a), Some(b)) => b.memory.zip(cpu_between(a, b)),
+            _ => None,
+        };
         if let Some(r) = job::poll(&mut self.switching, &ctx) {
             match r {
                 Ok(on) => {
                     self.on = on;
-                    self.usage = None;
-                    self.usage_at = now - 2.0; // measure soon after it starts
+                    self.on_since = now;
+                    self.last = None;
+                    self.prev = None;
+                    self.probe_at = now - 2.0; // look soon after it starts
                 }
                 Err(e) => {
                     self.on = is_on();
@@ -223,9 +261,7 @@ impl Monitor {
                 }
             }
         }
-        if self.on {
-            ctx.request_repaint_after(std::time::Duration::from_secs(3));
-        }
+        ctx.request_repaint_after(std::time::Duration::from_secs(3));
 
         theme::card(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -233,16 +269,32 @@ impl Monitor {
                 theme::icon_tile(ui, icon::GAUGE, p.accent, 34.0);
                 ui.vertical(|ui| {
                     ui.label(theme::semi("Menu bar monitor", 15.0));
-                    let sub = match (&self.error, self.on, self.usage) {
-                        (Some(e), _, _) => e.clone(),
-                        (None, false, _) => "Off · nothing runs in the background".to_string(),
-                        (None, true, Some((mem, cpu))) => format!(
-                            "On · the monitor itself uses {:.1} MB of memory and {cpu:.1}% CPU",
-                            mem as f64 / 1e6
+                    let starting = now - self.on_since < 8.0 || self.last.is_none();
+                    let (sub, warn) = match (&self.error, self.on, running, usage) {
+                        (Some(e), ..) => (e.clone(), true),
+                        (None, false, ..) => ("Off · nothing runs in the background".to_string(), false),
+                        (None, true, true, Some((mem, cpu))) => (
+                            format!(
+                                "On · the monitor itself uses {:.1} MB of memory and {cpu:.1}% CPU",
+                                mem as f64 / 1e6
+                            ),
+                            false,
                         ),
-                        (None, true, None) => "On · starting…".to_string(),
+                        (None, true, true, None) => ("On · measuring…".to_string(), false),
+                        (None, true, false, _) if starting => ("On · starting…".to_string(), false),
+                        // Switched on, but not running: usually blocked in Login Items.
+                        (None, true, false, _) => (
+                            "On, but not running. macOS may be blocking it: in System Settings › General › Login Items, \
+                             allow macsweep-monitor in the background, then turn it off and on here."
+                                .to_string(),
+                            true,
+                        ),
                     };
-                    ui.label(theme::dim(sub, 12.5));
+                    if warn {
+                        ui.label(theme::text(sub, 12.5).color(theme::WARN));
+                    } else {
+                        ui.label(theme::dim(sub, 12.5));
+                    }
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let busy = self.switching.is_some();

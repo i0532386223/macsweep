@@ -296,8 +296,27 @@ mod stats;
 #[cfg(target_os = "macos")]
 pub use stats::footprint;
 
+/// One of the current user's processes, found by executable name.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Proc {
+    pub pid: i32,
+    /// When it started, Unix seconds.
+    pub started: u64,
+    /// CPU time used so far, nanoseconds.
+    pub cpu_ns: u64,
+}
+
+/// Finds the current user's process running an executable called `name`,
+/// straight from the kernel (no `pgrep`/`ps`).
+pub fn find_process(name: &str) -> Option<Proc> {
+    mac::find_process(name)
+}
+
 #[cfg(not(target_os = "macos"))]
 mod mac {
+    pub fn find_process(_name: &str) -> Option<super::Proc> {
+        None
+    }
     pub fn read_smart_log(_bsd: &str) -> Option<[u8; 512]> {
         None
     }
@@ -371,6 +390,71 @@ mod mac {
             swap_used: swap.map(|s| s.used),
             swap_total: swap.map(|s| s.total),
         }
+    }
+
+    pub fn find_process(name: &str) -> Option<super::Proc> {
+        let uid = unsafe { libc::getuid() };
+        let n = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
+        if n <= 0 {
+            return None;
+        }
+        let mut pids = vec![0i32; n as usize + 64];
+        let bytes = (pids.len() * std::mem::size_of::<i32>()) as i32;
+        let n = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), bytes) };
+        pids.truncate(n.max(0) as usize);
+        let bsd_size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
+        for pid in pids.into_iter().filter(|&p| p > 0) {
+            let mut bsd: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+            let got = unsafe {
+                libc::proc_pidinfo(
+                    pid,
+                    libc::PROC_PIDTBSDINFO,
+                    0,
+                    (&mut bsd as *mut libc::proc_bsdinfo).cast(),
+                    bsd_size,
+                )
+            };
+            if got != bsd_size || bsd.pbi_uid != uid {
+                continue;
+            }
+            let mut path = vec![0u8; 4096];
+            let len = unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
+            if len <= 0 {
+                continue;
+            }
+            let exe = std::path::Path::new(std::str::from_utf8(&path[..len as usize]).unwrap_or(""));
+            if exe.file_name().is_some_and(|f| f == name) {
+                return Some(super::Proc {
+                    pid,
+                    started: bsd.pbi_start_tvsec,
+                    cpu_ns: cpu_ns(pid).unwrap_or(0),
+                });
+            }
+        }
+        None
+    }
+
+    /// Total CPU time of a process in nanoseconds.
+    fn cpu_ns(pid: i32) -> Option<u64> {
+        let mut t: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_taskinfo>() as i32;
+        let got = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTASKINFO,
+                0,
+                (&mut t as *mut libc::proc_taskinfo).cast(),
+                size,
+            )
+        };
+        if got != size {
+            return None;
+        }
+        // Reported in Mach time units (not nanoseconds on Apple silicon).
+        let mut tb = libc::mach_timebase_info { numer: 0, denom: 0 };
+        unsafe { libc::mach_timebase_info(&mut tb) };
+        let ticks = u128::from(t.pti_total_user + t.pti_total_system);
+        (tb.denom != 0).then(|| (ticks * u128::from(tb.numer) / u128::from(tb.denom)) as u64)
     }
 
     // --- NVMe SMART through IOKit (the interface smartctl uses on macOS) ---
