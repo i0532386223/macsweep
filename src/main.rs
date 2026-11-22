@@ -7,6 +7,8 @@ mod job;
 mod junk;
 mod large;
 mod monitor;
+#[path = "../monitor/src/shared.rs"]
+mod shared;
 mod theme;
 mod uninstall;
 

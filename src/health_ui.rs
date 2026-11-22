@@ -36,11 +36,7 @@ fn line(ui: &mut Ui, label: &str, value: String, hint: &str) {
     ui.end_row();
 }
 
-/// Memory sizes exactly as Activity Monitor shows them (1 GB = 1024³ bytes,
-/// two decimals), so the two can be compared directly.
-fn fmt_mem(b: u64) -> String {
-    format!("{:.2} GB", b as f64 / 1_073_741_824.0)
-}
+use crate::shared::fmt_mem;
 
 fn na() -> String {
     "Not available".into()

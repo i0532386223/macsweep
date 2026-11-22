@@ -12,6 +12,8 @@
 // On other systems only the shared logic is built (for tests).
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
+#[allow(dead_code)] // render() is only used by MacSweep itself
+mod shared;
 mod stats;
 
 #[cfg(not(target_os = "macos"))]
@@ -46,9 +48,7 @@ mod mac {
     use std::ptr::NonNull;
     use std::rc::Rc;
 
-    pub const LABEL: &str = "com.nihal.macsweep.monitor";
-    /// Posted by MacSweep after it saves new settings (Darwin notification).
-    pub const RELOAD: &str = "com.nihal.macsweep.monitor.reload";
+    use crate::shared::{CONF, LABEL, RELOAD};
 
     unsafe extern "C" {
         static _dispatch_main_q: c_void;
@@ -65,7 +65,7 @@ mod mac {
     }
 
     fn config() -> Config {
-        let p = home().join("Library/Application Support/MacSweep/monitor.conf");
+        let p = home().join(CONF);
         Config::parse(&std::fs::read_to_string(p).unwrap_or_default())
     }
 
@@ -190,7 +190,7 @@ mod mac {
             if let Some(old) = self.timer.borrow_mut().take() {
                 old.invalidate();
             }
-            let interval = self.config.get().interval;
+            let interval = f64::from(self.config.get().interval);
             let me = Rc::downgrade(self);
             let tick = RcBlock::new(move |_: NonNull<NSTimer>| {
                 if let Some(m) = me.upgrade() {

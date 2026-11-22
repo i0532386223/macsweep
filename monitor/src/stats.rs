@@ -1,49 +1,7 @@
 //! Reads CPU, memory and disk numbers straight from the macOS kernel.
 //! Every call here takes microseconds: no subprocesses, no file scanning.
 
-/// What the user chose to show, from MacSweep's settings file.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Config {
-    pub cpu: bool,
-    pub ram: bool,
-    pub disk: bool,
-    /// Seconds between updates (1 = live).
-    pub interval: f64,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            cpu: true,
-            ram: true,
-            disk: true,
-            interval: 1.0,
-        }
-    }
-}
-
-impl Config {
-    /// Parses `key=value` lines; anything unknown or broken keeps its default.
-    pub fn parse(text: &str) -> Self {
-        let mut c = Self::default();
-        for line in text.lines() {
-            let Some((k, v)) = line.split_once('=') else { continue };
-            let on = v.trim() == "1";
-            match k.trim() {
-                "cpu" => c.cpu = on,
-                "ram" => c.ram = on,
-                "disk" => c.disk = on,
-                "interval" => {
-                    if let Ok(n) = v.trim().parse::<f64>() {
-                        c.interval = n.clamp(1.0, 60.0);
-                    }
-                }
-                _ => {}
-            }
-        }
-        c
-    }
-}
+pub use crate::shared::Config;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Pressure {
@@ -304,27 +262,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_file_is_read_safely() {
-        let c = Config::parse("cpu=1\nram=0\ndisk=1\ninterval=2\n");
-        assert_eq!(
-            c,
-            Config {
-                cpu: true,
-                ram: false,
-                disk: true,
-                interval: 2.0
-            }
-        );
-        assert_eq!(Config::parse(""), Config::default());
-        assert_eq!(
-            Config::parse("interval=0.01").interval,
-            1.0,
-            "never faster than once a second"
-        );
-        assert_eq!(Config::parse("interval=abc").interval, 1.0);
-    }
-
-    #[test]
     fn memory_used_matches_activity_monitor() {
         // Activity Monitor on a MacBook Air M1 (16 KB pages): Physical 8.00 GB,
         // Cached Files 1.31 GB, about 0.06 GB free → Memory Used 6.63 GB.
@@ -364,7 +301,7 @@ mod tests {
             cpu: false,
             ram: false,
             disk: false,
-            interval: 1.0,
+            interval: 1,
         };
         assert_eq!(title(&none, 0.0, 0, 0, None, Pressure::Normal), "MacSweep");
     }

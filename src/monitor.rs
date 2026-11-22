@@ -10,55 +10,15 @@ use eframe::egui::{self, Color32, Ui};
 use std::path::PathBuf;
 use std::process::Command;
 
-pub const LABEL: &str = "com.nihal.macsweep.monitor";
+use crate::shared::RELOAD;
+pub use crate::shared::{CONF, Config, LABEL};
 
-/// What the menu bar shows. Saved as simple `key=value` lines the helper reads.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Config {
-    pub cpu: bool,
-    pub ram: bool,
-    pub disk: bool,
-    pub interval: u32,
+/// What the menu bar will look like (with example numbers).
+trait Preview {
+    fn preview(&self) -> String;
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            cpu: true,
-            ram: true,
-            disk: true,
-            interval: 1,
-        }
-    }
-}
-
-impl Config {
-    fn parse(text: &str) -> Self {
-        let mut c = Self::default();
-        for (k, v) in text.lines().filter_map(|l| l.split_once('=')) {
-            let on = v.trim() == "1";
-            match k.trim() {
-                "cpu" => c.cpu = on,
-                "ram" => c.ram = on,
-                "disk" => c.disk = on,
-                "interval" => c.interval = v.trim().parse().unwrap_or(1).clamp(1, 60),
-                _ => {}
-            }
-        }
-        c
-    }
-
-    fn render(&self) -> String {
-        let b = |x: bool| if x { 1 } else { 0 };
-        format!(
-            "cpu={}\nram={}\ndisk={}\ninterval={}\n",
-            b(self.cpu),
-            b(self.ram),
-            b(self.disk),
-            self.interval
-        )
-    }
-
+impl Preview for Config {
     /// What the menu bar will look like (with example numbers).
     fn preview(&self) -> String {
         let mut v = Vec::new();
@@ -76,7 +36,7 @@ impl Config {
 }
 
 fn conf_path() -> PathBuf {
-    fsutil::home().join("Library/Application Support/MacSweep/monitor.conf")
+    fsutil::home().join(CONF)
 }
 
 fn plist_path() -> PathBuf {
@@ -151,12 +111,13 @@ fn turn_off() {
 /// Tells a running monitor to re-read its settings. Instant, never blocks:
 /// a Darwin notification, which the monitor receives at no cost while idle.
 fn notify_monitor() {
+    let _name = RELOAD;
     #[cfg(target_os = "macos")]
     {
         unsafe extern "C" {
             fn notify_post(name: *const std::ffi::c_char) -> u32;
         }
-        let name = std::ffi::CString::new("com.nihal.macsweep.monitor.reload").unwrap();
+        let name = std::ffi::CString::new(RELOAD).unwrap();
         unsafe { notify_post(name.as_ptr()) };
     }
 }
