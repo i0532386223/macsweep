@@ -179,9 +179,12 @@ mod mac {
                 set(
                     &self.own_line,
                     format!(
-                        "This monitor: {:.1} MB · updates every {:.0} s",
+                        "This monitor: {:.1} MB · {}",
                         stats::own_memory() as f64 / 1e6,
-                        self.config.get().interval
+                        match self.config.get().interval {
+                            1 => "updates live".to_string(),
+                            n => format!("updates every {n} s"),
+                        }
                     ),
                 );
             }
@@ -354,6 +357,11 @@ mod mac {
         let menu = NSMenu::new(mtm);
         menu.setAutoenablesItems(false);
         menu.setDelegate(Some(ProtocolObject::from_ref(&*actions)));
+        // Header, so it's clear which app this menu belongs to.
+        let header = NSMenuItem::new(mtm);
+        header.setTitle(ns_string!("MacSweep Monitor"));
+        header.setEnabled(false);
+        menu.addItem(&header);
         let cpu_line = info_item(mtm, &menu);
         let ram_line = info_item(mtm, &menu);
         let pressure_line = info_item(mtm, &menu);
