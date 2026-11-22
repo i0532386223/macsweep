@@ -56,10 +56,23 @@ MacSweep and Activity Monitor → Memory open at the same moment on the same Mac
 
 | Item | MacSweep | Activity Monitor | Match |
 |---|---|---|---|
-| Memory in use | 6.4 GB (before two decimals) | Memory Used 6.45 GB | ✅ |
-| Swap in use | 0.1 GB | Swap Used 123.9 MB | ✅ |
+| Memory in use, reading 1 | 6.4 GB | Memory Used 6.45 GB | ✅ −0.05 |
+| Memory in use, reading 2 | 6.38 GB | 6.51 GB | ✅ −0.13 |
+| Memory in use, reading 3 | 6.49 GB | 6.60 GB | ✅ −0.11 |
+| Memory in use, from `vm_stat` by hand | 6.66 GB | 6.60 GB | ✅ +0.06 |
+| Swap in use | 0.12 GB | Swap Used 123.9 MB | ✅ |
 | Memory pressure | High | yellow graph | ✅ |
 | Memory pressure | Normal (`kern.memorystatus_vm_pressure_level` = 1) | green graph | ✅ |
+
+**Memory in use matches within about 0.1 GB (2%).** Apple doesn't publish how
+Activity Monitor calculates Memory Used, and memory shifts by around 0.1 GB from
+second to second, so two tools never read the exact same moment. The gap goes
+both ways (−0.13 to +0.06 GB), which points to timing rather than a different
+calculation. Activity Monitor's own sub-totals differ from `vm_stat` taken a
+moment earlier by a similar amount.
+
+MacSweep's calculation: all physical memory − free pages − file-backed pages
+(Cached Files) − purgeable pages, from the kernel's VM statistics.
 
 Two earlier versions did **not** match and were fixed before release:
 
