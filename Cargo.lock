@@ -1245,6 +1245,7 @@ dependencies = [
  "rayon",
  "rusqlite",
  "serde_json",
+ "skrifa",
  "snap",
  "trash",
 ]
