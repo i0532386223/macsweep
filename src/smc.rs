@@ -103,8 +103,8 @@ mod mac {
 
     #[link(name = "IOKit", kind = "framework")]
     unsafe extern "C" {
-        fn IOServiceMatching(name: *const c_char) -> *mut c_void;
-        fn IOServiceGetMatchingService(main_port: u32, matching: *mut c_void) -> IoObject;
+        fn IOServiceMatching(name: *const c_char) -> *const c_void;
+        fn IOServiceGetMatchingService(main_port: u32, matching: *const c_void) -> IoObject;
         fn IOServiceOpen(service: IoObject, task: u32, kind: u32, conn: *mut IoObject) -> i32;
         fn IOServiceClose(conn: IoObject) -> i32;
         fn IOObjectRelease(o: IoObject) -> i32;
