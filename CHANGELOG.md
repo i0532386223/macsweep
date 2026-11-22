@@ -13,7 +13,7 @@
 Apple calculates Maximum Capacity its own way. On the test Mac the raw mAh ratios were 89% and 86% while Apple showed 90%, so MacSweep never calculates it and always shows Apple's figure.
 
 ### New: menu bar monitor (optional, off by default)
-- Shows CPU, memory and free disk space in the menu bar. Choose which, and update **live (every second)**, every 2 s or every 5 s.
+- Shows CPU, memory and free disk space in the menu bar (`CPU 12%  RAM 61%  120 GB free`). Choose which, and update **live (every second)**, every 2 s or every 5 s.
 - A separate tiny native helper, so MacSweep itself doesn't stay open. Settings apply instantly. Turning it off, in Mac Health or from its own menu, removes it completely.
 - Its menu shows details (memory pressure, disk space) and what the monitor itself is using.
 
@@ -28,6 +28,14 @@ Apple calculates Maximum Capacity its own way. On the test Mac the raw mAh ratio
 A **1-hour run at Live** showed no memory growth: 13.1 MB on average, never above 14.7 MB, at 2.34 % CPU and Energy Impact 2.25.
 
 The M1 has 8 cores, so Live is about 0.3 % of the whole Mac. Profiling showed our own code is under 1 ms per update. The rest is macOS redrawing the menu-bar item, which every monitor that updates each second pays. We tried drawing the numbers as an image instead of text: no measurable difference, so the simpler text stays.
+
+- The monitor stops completely while the screen is off or another user's session is in front, and restarts itself when MacSweep is updated.
+- It must run from your Applications folder (not Downloads or a disk image), so it keeps working after a restart.
+
+### Security
+- Every system command is called by its full path (`/bin/launchctl`, `/usr/bin/osascript` …), so a changed `PATH` can't substitute another program.
+- The "Relaunch" button after granting Full Disk Access quoted the app's path unsafely for the shell; a folder name containing `$` or a backtick could run a command. Fixed.
+- The release pipeline pins every third-party GitHub Action to an exact commit, and CI runs with read-only permissions.
 
 ### Development
 - `main` is protected: every change goes through a pull request, and CI (formatting, tests, app build) must pass.
