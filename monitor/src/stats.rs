@@ -143,6 +143,14 @@ mod mac {
         total_uncompressed_pages_in_compressor: u64,
     }
 
+    /// The host port, asked for once per process. Each `mach_host_self()`
+    /// call adds a reference that is never given back, so asking on every
+    /// Sampler (Mac Health makes one every 2 s) slowly leaked them.
+    fn host_port() -> MachPort {
+        static HOST: std::sync::OnceLock<MachPort> = std::sync::OnceLock::new();
+        *HOST.get_or_init(|| unsafe { mach_host_self() })
+    }
+
     pub struct Sampler {
         host: MachPort,
         page: u64,
@@ -152,8 +160,7 @@ mod mac {
 
     impl Sampler {
         pub fn new() -> Self {
-            // One port for the whole run; asking each time would leak rights.
-            let host = unsafe { mach_host_self() };
+            let host = host_port();
             let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(4096) as u64;
             let mut s = Self {
                 host,
