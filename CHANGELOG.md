@@ -32,6 +32,20 @@ The M1 has 8 cores, so Live is about 0.3 % of the whole Mac. Profiling showed ou
 - The monitor stops completely while the screen is off or another user's session is in front, and restarts itself when MacSweep is updated.
 - It must run from your Applications folder (not Downloads or a disk image), so it keeps working after a restart.
 
+### New: Browser Cleanup
+See what each browser keeps on your Mac, sorted into three groups, and choose exactly what goes. Supports Chrome, Brave, Edge, Arc, Vivaldi, Opera and Chromium; one section per browser, with its own logo.
+- **AI models** the browser downloaded, such as Chrome's Gemini Nano and its scam detection model, each with what it does and its version. Removed models go to the Trash. Chrome downloads them again unless On-device AI is turned off, so a button opens that setting.
+- **Website data**, one line per website and profile, with the site's own icon: databases, offline files and file storage. **This is where web games keep saves and downloaded game files**, so nothing here is ticked for you, and the confirmation names every site and warns that its saves go and you may be signed out. Removed data goes to the Trash.
+- **Cache** (pages, compiled scripts, graphics), which browsers rebuild. The only group ticked by default; deleted outright.
+- Filter by profile, search, and sort by size, profile, name or last use. Only lines that are both ticked and shown are cleaned.
+- **Never touched:** passwords, cookies, history, bookmarks, extensions' data and Local Storage (where sign-ins live). An allowlist refuses any other folder, and a browser that is open is never cleaned.
+- Website icons come from the browser's own icon database, read without changing it. Nothing is fetched online, so no server learns which sites you visit.
+
+**Validated** on a MacBook Air M1 (macOS 27.3) with 5 Chrome profiles and Brave:
+- Chrome names website folders by code (`6c531fa0…`, `018`). MacSweep traced every one back to its website from Chrome's own indexes; none was left unnamed. The largest, 3.8 GB, was **web.nfsmwo.com**, a browser game, whose saves a blind "clear cache" would have deleted. Other web games found: nfsu2.xyz, a crazygames.com game, dos.zone.
+- AI models found: 208.7 MB (scam detection model, small feature models, address-bar suggestions). Gemini Nano was not downloaded on this Mac. Turning off On-device AI in Chrome's settings made Chrome delete all of them itself, as Google documents.
+- `MacSweep --browser-report` prints everything the scan finds, with every path, so you can check it on your own Mac. It changes nothing.
+
 ### Security
 - Every system command is called by its full path (`/bin/launchctl`, `/usr/bin/osascript` …), so a changed `PATH` can't substitute another program.
 - The "Relaunch" button after granting Full Disk Access quoted the app's path unsafely for the shell; a folder name containing `$` or a backtick could run a command. Fixed.
