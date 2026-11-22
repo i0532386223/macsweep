@@ -86,7 +86,7 @@ echo
 echo "=================== Safari ==================="
 for d in "$CA/com.apple.Safari" "$HOME/Library/Containers/com.apple.Safari/Data/Library/Caches" \
          "$HOME/Library/Containers/com.apple.Safari/Data/Library/WebKit/WebsiteData" "$HOME/Library/Safari"; do
-  if ls "$d" >/dev/null 2>&1; then echo "   $(size "$d")  ${d/#"$HOME"/\~}"; else echo "   (no access) ${d/#"$HOME"/\~}"; fi
+  if ls "$d" >/dev/null 2>&1; then echo "   $(size "$d")  ${d/#"$HOME"/"~"}"; else echo "   (no access) ${d/#"$HOME"/"~"}"; fi
 done
 
 echo
