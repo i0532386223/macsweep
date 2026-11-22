@@ -1,12 +1,16 @@
 //! The Browser Cleanup screen: one section per browser, and inside it
 //! AI models, website data and cache, each line with its size and what
-//! removing it means.
-use crate::browsers::{self, Browser, Group, Outcome, Plan};
+//! removing it means. Lines can be narrowed to one profile, searched and
+//! sorted; only lines that are both ticked and shown are ever cleaned.
+use crate::browsers::{self, Browser, Group, Item, Outcome, Plan};
 use crate::fsutil::{self, fmt_size};
 use crate::job::{self, Job};
 use crate::junk::{busy_screen, done_screen};
 use crate::theme::{self, Palette, icon};
-use eframe::egui::{self, Color32, Layout, Ui};
+use crate::uninstall;
+use eframe::egui::{self, Color32, ColorImage, Layout, TextureHandle, TextureOptions, Ui, vec2};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 const MODEL_COLOR: Color32 = Color32::from_rgb(0x9a, 0x6b, 0xf0);
 const SITE_COLOR: Color32 = Color32::from_rgb(0x3a, 0x8d, 0xde);
@@ -21,6 +25,52 @@ enum Stage {
     Done(&'static str, Outcome),
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum Sort {
+    Size,
+    Profile,
+    Name,
+    Recent,
+}
+
+impl Sort {
+    const ALL: [Sort; 4] = [Sort::Size, Sort::Profile, Sort::Name, Sort::Recent];
+    fn label(self) -> &'static str {
+        match self {
+            Sort::Size => "Largest first",
+            Sort::Profile => "By profile",
+            Sort::Name => "By name",
+            Sort::Recent => "Recently used",
+        }
+    }
+}
+
+/// Logos, loaded in the background after a scan.
+enum Logo {
+    Browser(&'static str, ColorImage),
+    Site(PathBuf, String, ColorImage),
+}
+
+/// What the list shows right now.
+struct View {
+    /// None = all profiles
+    profile: Option<String>,
+    query: String,
+    sort: Sort,
+}
+
+impl View {
+    fn shows(&self, it: &Item) -> bool {
+        let profile_ok = match (&self.profile, &it.profile) {
+            (Some(want), Some(p)) => want == p,
+            _ => true, // browser-wide items show for every profile
+        };
+        let q = self.query.trim().to_lowercase();
+        let query_ok = q.is_empty() || it.title.to_lowercase().contains(&q) || it.detail.to_lowercase().contains(&q);
+        profile_ok && query_ok
+    }
+}
+
 pub struct BrowsersPane {
     stage: Stage,
     browsers: Vec<Browser>,
@@ -30,8 +80,12 @@ pub struct BrowsersPane {
     cleaning: &'static str,
     confirm: bool,
     all_sites: bool,
+    view: View,
     running: Option<Job<Vec<bool>>>,
     running_at: f64,
+    logo_job: Option<Job<Vec<Logo>>>,
+    browser_logos: HashMap<&'static str, TextureHandle>,
+    site_logos: HashMap<(PathBuf, String), TextureHandle>,
 }
 
 impl Default for BrowsersPane {
@@ -45,8 +99,16 @@ impl Default for BrowsersPane {
             cleaning: "",
             confirm: false,
             all_sites: false,
+            view: View {
+                profile: None,
+                query: String::new(),
+                sort: Sort::Size,
+            },
             running: None,
             running_at: 0.0,
+            logo_job: None,
+            browser_logos: HashMap::new(),
+            site_logos: HashMap::new(),
         }
     }
 }
@@ -76,6 +138,33 @@ fn group_note(g: Group, b: &Browser) -> String {
     }
 }
 
+/// Browser logos from the apps, website logos from each profile's own
+/// icon database. Nothing is downloaded.
+fn load_logos(browsers: Vec<(&'static str, Option<PathBuf>, Vec<(PathBuf, String)>)>) -> Vec<Logo> {
+    let mut out = Vec::new();
+    for (name, app, sites) in browsers {
+        if let Some(app) = app {
+            let file = browsers::app_icon_file(&app);
+            if let Some(img) = uninstall::load_icon(&app, file.as_deref()).or_else(|| uninstall::system_icon(&app)) {
+                out.push(Logo::Browser(name, img));
+            }
+        }
+        let mut by_profile: HashMap<PathBuf, Vec<String>> = HashMap::new();
+        for (dir, host) in sites {
+            by_profile.entry(dir).or_default().push(host);
+        }
+        for (dir, hosts) in by_profile {
+            let icons = browsers::favicons(&dir);
+            for host in hosts {
+                if let Some(img) = browsers::favicon_for(&icons, &host).and_then(|png| uninstall::decode_png_bytes(png)) {
+                    out.push(Logo::Site(dir.clone(), host, img));
+                }
+            }
+        }
+    }
+    out
+}
+
 impl BrowsersPane {
     fn start_scan(&mut self, ctx: &egui::Context) {
         if self.scan.is_some() || self.clean.is_some() {
@@ -87,6 +176,7 @@ impl BrowsersPane {
 
     fn start_clean(&mut self, ctx: &egui::Context) {
         let Some(b) = self.browsers.get(self.focus) else { return };
+        let view = &self.view;
         let plan = Plan {
             name: b.name,
             bundle_id: b.bundle_id,
@@ -95,12 +185,19 @@ impl BrowsersPane {
             items: b
                 .items
                 .iter()
-                .filter(|i| i.selected)
+                .filter(|i| i.selected && view.shows(i))
                 .map(|i| (i.group, i.paths.clone(), i.size))
                 .collect(),
         };
         self.cleaning = b.name;
         self.clean = Some(Job::spawn(ctx, move |_, _| browsers::clean(vec![plan])));
+    }
+
+    fn reset_view(&mut self) {
+        self.view.profile = None;
+        self.view.query.clear();
+        self.all_sites = false;
+        self.confirm = false;
     }
 
     fn poll(&mut self, ctx: &egui::Context) {
@@ -109,7 +206,43 @@ impl BrowsersPane {
             let was = self.browsers.get(self.focus).map(|b| b.name);
             self.browsers = found;
             self.focus = was.and_then(|n| self.browsers.iter().position(|b| b.name == n)).unwrap_or(0);
+            if let Some(p) = &self.view.profile {
+                if !self.browsers.get(self.focus).is_some_and(|b| b.profiles.contains(p)) {
+                    self.view.profile = None;
+                }
+            }
             self.stage = Stage::Results;
+            let want: Vec<_> = self
+                .browsers
+                .iter()
+                .map(|b| {
+                    let sites = b
+                        .items
+                        .iter()
+                        .filter(|i| i.group == Group::Site)
+                        .filter_map(|i| Some((i.profile_dir.clone()?, i.title.clone())))
+                        .filter(|k| !self.site_logos.contains_key(k))
+                        .collect();
+                    let app = (!self.browser_logos.contains_key(b.name)).then(|| b.app.clone()).flatten();
+                    (b.name, app, sites)
+                })
+                .collect();
+            self.logo_job = Some(Job::spawn(ctx, move |_, _| load_logos(want)));
+        }
+        if let Some(logos) = job::poll(&mut self.logo_job, ctx) {
+            for l in logos {
+                match l {
+                    Logo::Browser(name, img) => {
+                        let tex = ctx.load_texture(format!("browser-{name}"), img, TextureOptions::LINEAR);
+                        self.browser_logos.insert(name, tex);
+                    }
+                    Logo::Site(dir, host, img) => {
+                        let id = format!("site-{}-{host}", dir.display());
+                        let tex = ctx.load_texture(id, img, TextureOptions::LINEAR);
+                        self.site_logos.insert((dir, host), tex);
+                    }
+                }
+            }
         }
         if let Some(out) = job::poll(&mut self.clean, ctx) {
             self.stage = Stage::Done(self.cleaning, out);
@@ -273,6 +406,7 @@ impl BrowsersPane {
                 });
             });
 
+        let mut switch_to = None;
         egui::Panel::left("browsers_list")
             .resizable(false)
             .exact_size((ui.available_width() * 0.30).clamp(220.0, 290.0))
@@ -281,8 +415,9 @@ impl BrowsersPane {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                     for (i, b) in self.browsers.iter().enumerate() {
+                        let logo = self.browser_logos.get(b.name);
                         let resp = theme::row(ui, 58.0, self.focus == i, |ui| {
-                            theme::icon_tile(ui, icon::GLOBE, p.accent.gamma_multiply(0.8), 34.0);
+                            browser_logo(ui, logo, p, 36.0);
                             ui.vertical(|ui| {
                                 ui.add_space(9.0);
                                 ui.label(theme::semi(b.name, 14.0));
@@ -302,26 +437,30 @@ impl BrowsersPane {
                             });
                         });
                         if resp.clicked() && self.focus != i {
-                            self.focus = i;
-                            self.confirm = false;
-                            self.all_sites = false;
+                            switch_to = Some(i);
                         }
                         ui.add_space(2.0);
                     }
                 });
             });
+        if let Some(i) = switch_to {
+            self.focus = i;
+            self.reset_view();
+        }
 
-        let many_profiles = self.browsers[self.focus].profiles.len() > 1;
         let mut changed = false;
-        let all_sites = &mut self.all_sites;
+        let logo = self.browser_logos.get(self.browsers[self.focus].name).cloned();
         let b = &mut self.browsers[self.focus];
+        let view = &mut self.view;
+        let all_sites = &mut self.all_sites;
+        let site_logos = &self.site_logos;
         theme::card(ui, |ui| {
             ui.set_min_size(ui.available_size());
             ui.horizontal(|ui| {
-                theme::icon_tile(ui, icon::GLOBE, p.accent, 42.0);
+                browser_logo(ui, logo.as_ref(), p, 42.0);
                 ui.vertical(|ui| {
                     ui.label(theme::bold(b.name, 19.0));
-                    ui.label(theme::dim(format!("Profiles: {}", b.profiles.join(", ")), 12.5));
+                    ui.label(theme::dim(theme::plural(b.profiles.len(), "profile"), 12.5));
                 });
             });
             if b.running {
@@ -337,10 +476,11 @@ impl BrowsersPane {
                     .color(theme::WARN),
                 );
             }
+            changed |= controls(ui, b, view);
             ui.separator();
             egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
                 for g in [Group::Model, Group::Site, Group::Junk] {
-                    changed |= group_section(ui, b, g, many_profiles, all_sites);
+                    changed |= group_section(ui, b, g, view, all_sites, site_logos);
                     ui.add_space(14.0);
                 }
             });
@@ -352,10 +492,12 @@ impl BrowsersPane {
 
     fn clean_bar(&mut self, ui: &mut Ui, p: Palette, ctx: &egui::Context) {
         let Some(b) = self.browsers.get(self.focus) else { return };
-        let sel = move |g: Group| b.items.iter().filter(move |i| i.selected && i.group == g);
+        let view = &self.view;
+        let sel = move |g: Group| b.items.iter().filter(move |i| i.selected && i.group == g && view.shows(i));
         let deleted: u64 = sel(Group::Junk).map(|i| i.size).sum();
         let trashed: u64 = sel(Group::Model).chain(sel(Group::Site)).map(|i| i.size).sum();
-        let n = b.items.iter().filter(|i| i.selected).count();
+        let n = b.items.iter().filter(|i| i.selected && view.shows(i)).count();
+        let hidden = b.items.iter().filter(|i| i.selected && !view.shows(i)).count();
         if n == 0 || b.running {
             self.confirm = false;
         }
@@ -416,26 +558,133 @@ impl BrowsersPane {
             if trashed > 0 {
                 v.push(format!("{} to the Trash", fmt_size(trashed)));
             }
-            if v.is_empty() {
+            let mut line = if v.is_empty() {
                 format!("Nothing selected in {name}")
             } else {
                 format!("{} · {name} only", v.join(" · "))
+            };
+            // Only what is shown is cleaned, so say when the filter hides ticked lines.
+            if hidden > 0 {
+                line.push_str(&format!(
+                    " · {} hidden by the filter won't be cleaned",
+                    theme::plural(hidden, "ticked line")
+                ));
             }
+            line
         };
         ui.label(theme::dim(line, 12.5));
     }
 }
 
-/// One group's header (with select-all) and its lines. Returns true if the
-/// selection changed.
-fn group_section(ui: &mut Ui, b: &mut Browser, g: Group, many_profiles: bool, all_sites: &mut bool) -> bool {
+/// The browser's own logo, or a globe until it has loaded.
+fn browser_logo(ui: &mut Ui, logo: Option<&TextureHandle>, p: Palette, size: f32) {
+    match logo {
+        Some(t) => {
+            ui.add(egui::Image::new(t).fit_to_exact_size(vec2(size, size)));
+        }
+        None => {
+            theme::icon_tile(ui, icon::GLOBE, p.accent.gamma_multiply(0.8), size * 0.94);
+        }
+    }
+}
+
+/// Profile chips, search and sort. Returns true if the view changed.
+fn controls(ui: &mut Ui, b: &Browser, view: &mut View) -> bool {
+    let mut changed = false;
+    if b.profiles.len() > 1 {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(theme::dim("Profile", 12.0));
+            let chip = |ui: &mut Ui, label: &str, on: bool| {
+                let fill = if on {
+                    Color32::from_white_alpha(70)
+                } else {
+                    Color32::from_white_alpha(18)
+                };
+                ui.add(
+                    egui::Button::new(theme::semi(label, 12.0))
+                        .fill(fill)
+                        .corner_radius(10)
+                        .min_size(vec2(0.0, 24.0)),
+                )
+                .clicked()
+            };
+            if chip(ui, "All profiles", view.profile.is_none()) {
+                view.profile = None;
+                changed = true;
+            }
+            for name in &b.profiles {
+                if chip(ui, name, view.profile.as_ref() == Some(name)) {
+                    view.profile = Some(name.clone());
+                    changed = true;
+                }
+            }
+        });
+    }
+    ui.horizontal(|ui| {
+        let search = egui::TextEdit::singleline(&mut view.query)
+            .hint_text(format!("{}  Search websites", icon::MAGNIFYING_GLASS))
+            .desired_width(240.0);
+        if ui.add(search).changed() {
+            changed = true;
+        }
+        if !view.query.is_empty() && ui.small_button("Clear").clicked() {
+            view.query.clear();
+            changed = true;
+        }
+        ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
+            egui::ComboBox::from_id_salt("browser_sort")
+                .selected_text(view.sort.label())
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for s in Sort::ALL {
+                        ui.selectable_value(&mut view.sort, s, s.label());
+                    }
+                });
+            ui.label(theme::dim("Sort", 12.0));
+        });
+    });
+    changed
+}
+
+/// One group's header (with select-all for the lines shown) and its lines.
+/// Returns true if the selection changed.
+fn group_section(
+    ui: &mut Ui,
+    b: &mut Browser,
+    g: Group,
+    view: &View,
+    all_sites: &mut bool,
+    site_logos: &HashMap<(PathBuf, String), TextureHandle>,
+) -> bool {
     let (title, glyph, color) = group_info(g);
     let note = group_note(g, b);
     let is_chrome = b.bundle_id.starts_with("com.google.Chrome");
     let bundle = b.bundle_id;
-    let total = b.group_total(g);
+    let profiles = b.profiles.clone();
     let mut changed = false;
-    let items: Vec<usize> = (0..b.items.len()).filter(|&i| b.items[i].group == g).collect();
+    let all_in_group = b.items.iter().filter(|i| i.group == g).count();
+    let mut items: Vec<usize> = (0..b.items.len())
+        .filter(|&i| b.items[i].group == g && view.shows(&b.items[i]))
+        .collect();
+    let profile_rank = |it: &Item| {
+        it.profile
+            .as_ref()
+            .and_then(|p| profiles.iter().position(|x| x == p))
+            .unwrap_or(0)
+    };
+    match view.sort {
+        Sort::Size => items.sort_by(|&x, &y| b.items[y].size.cmp(&b.items[x].size)),
+        Sort::Profile => items.sort_by(|&x, &y| {
+            let (a, c) = (&b.items[x], &b.items[y]);
+            profile_rank(a).cmp(&profile_rank(c)).then(c.size.cmp(&a.size))
+        }),
+        Sort::Name => items.sort_by(|&x, &y| {
+            let key = |i: &Item| i.title.trim_start_matches("www.").to_lowercase();
+            key(&b.items[x]).cmp(&key(&b.items[y]))
+        }),
+        Sort::Recent => items.sort_by(|&x, &y| b.items[y].newest.cmp(&b.items[x].newest)),
+    }
+    let shown_total: u64 = items.iter().map(|&i| b.items[i].size).sum();
 
     ui.horizontal(|ui| {
         let n_sel = items.iter().filter(|&&i| b.items[i].selected).count();
@@ -449,8 +698,18 @@ fn group_section(ui: &mut Ui, b: &mut Browser, g: Group, many_profiles: bool, al
         }
         theme::icon_tile(ui, glyph, color, 32.0);
         ui.label(theme::bold(title, 16.0));
+        if items.len() < all_in_group {
+            ui.label(theme::dim(format!("showing {} of {}", items.len(), all_in_group), 12.0));
+        }
         ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(theme::semi(if items.is_empty() { "—".into() } else { fmt_size(total) }, 14.0));
+            ui.label(theme::semi(
+                if items.is_empty() {
+                    "—".into()
+                } else {
+                    fmt_size(shown_total)
+                },
+                14.0,
+            ));
         });
     });
     ui.label(theme::dim(note, 12.0));
@@ -463,23 +722,39 @@ fn group_section(ui: &mut Ui, b: &mut Browser, g: Group, many_profiles: bool, al
     }
     ui.add_space(4.0);
     if items.is_empty() {
-        let empty = match g {
-            Group::Model => "No AI models downloaded.",
-            Group::Site => "No website data.",
-            Group::Junk => "No cache.",
+        let empty = if all_in_group > 0 {
+            "Nothing matches the filter."
+        } else {
+            match g {
+                Group::Model => "No AI models downloaded.",
+                Group::Site => "No website data.",
+                Group::Junk => "No cache.",
+            }
         };
         ui.label(theme::dim(format!("{}  {empty}", icon::CHECK_CIRCLE), 13.0));
         return changed;
     }
 
-    let shown = if g == Group::Site && !*all_sites {
+    let many_profiles = b.profiles.len() > 1 && view.profile.is_none();
+    let shown = if g == Group::Site && !*all_sites && view.query.trim().is_empty() {
         FIRST_SITES
     } else {
         usize::MAX
     };
+    let mut last_profile: Option<String> = None;
     for &i in items.iter().take(shown) {
         let running = b.running;
         let it = &mut b.items[i];
+        // "By profile": a small heading where each profile starts.
+        if view.sort == Sort::Profile && many_profiles && it.profile.is_some() && it.profile != last_profile {
+            last_profile = it.profile.clone();
+            ui.add_space(4.0);
+            ui.label(theme::semi(it.profile.clone().unwrap_or_default(), 12.5));
+        }
+        let logo = match (&it.profile_dir, g) {
+            (Some(dir), Group::Site) => site_logos.get(&(dir.clone(), it.title.clone())),
+            _ => None,
+        };
         egui::Frame::new()
             .fill(Color32::from_white_alpha(10))
             .corner_radius(10)
@@ -489,9 +764,19 @@ fn group_section(ui: &mut Ui, b: &mut Browser, g: Group, many_profiles: bool, al
                     if ui.add_enabled(!running, egui::Checkbox::new(&mut it.selected, "")).changed() {
                         changed = true;
                     }
+                    if g == Group::Site {
+                        match logo {
+                            Some(t) => {
+                                ui.add(egui::Image::new(t).fit_to_exact_size(vec2(18.0, 18.0)));
+                            }
+                            None => {
+                                ui.label(theme::ic(icon::GLOBE, 16.0).color(Color32::from_white_alpha(110)));
+                            }
+                        }
+                    }
                     // Size on the right first, so long text wraps before it.
                     ui.with_layout(Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.allocate_ui_with_layout(egui::vec2(96.0, 34.0), Layout::top_down(egui::Align::Max), |ui| {
+                        ui.allocate_ui_with_layout(vec2(96.0, 34.0), Layout::top_down(egui::Align::Max), |ui| {
                             ui.label(theme::semi(fmt_size(it.size), 13.0));
                             if g == Group::Site {
                                 ui.label(theme::dim(format!("used {}", fsutil::fmt_age(it.newest)), 11.0));
@@ -510,7 +795,7 @@ fn group_section(ui: &mut Ui, b: &mut Browser, g: Group, many_profiles: bool, al
                                             fsutil::reveal(p);
                                         }
                                     }
-                                    if many_profiles {
+                                    if many_profiles && view.sort != Sort::Profile {
                                         if let Some(pr) = &it.profile {
                                             theme::badge(ui, pr, Color32::from_white_alpha(40));
                                         }
@@ -531,4 +816,46 @@ fn group_section(ui: &mut Ui, b: &mut Browser, g: Group, many_profiles: bool, al
         }
     }
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(title: &str, profile: Option<&str>, group: Group) -> Item {
+        Item {
+            group,
+            title: title.into(),
+            detail: "offline files 3.8 GB".into(),
+            profile: profile.map(Into::into),
+            profile_dir: None,
+            paths: vec![],
+            size: 1,
+            newest: None,
+            selected: true,
+        }
+    }
+
+    #[test]
+    fn filter_by_profile_and_search() {
+        let game = item("web.nfsmwo.com", Some("NIHAL (Default)"), Group::Site);
+        let fb = item("www.facebook.com", Some("Potato (Profile 4)"), Group::Site);
+        let model = item("Gemini Nano", None, Group::Model);
+        let mut v = View {
+            profile: None,
+            query: String::new(),
+            sort: Sort::Size,
+        };
+        assert!(v.shows(&game) && v.shows(&fb) && v.shows(&model));
+
+        v.profile = Some("NIHAL (Default)".into());
+        assert!(v.shows(&game) && !v.shows(&fb));
+        assert!(v.shows(&model), "browser-wide items show under every profile");
+
+        v.profile = None;
+        v.query = "  NFS ".into(); // case and spaces don't matter
+        assert!(v.shows(&game) && !v.shows(&fb) && !v.shows(&model));
+        v.query = "offline".into(); // the breakdown is searched too
+        assert!(v.shows(&game));
+    }
 }

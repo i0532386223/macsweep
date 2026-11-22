@@ -432,7 +432,7 @@ fn find_apps() -> Vec<AppInfo> {
 // ---------- icons ----------
 
 /// Decodes the app's .icns into a small 64×64 RGBA image.
-fn load_icon(app: &Path, icon_file: Option<&str>) -> Option<ColorImage> {
+pub fn load_icon(app: &Path, icon_file: Option<&str>) -> Option<ColorImage> {
     let real = std::fs::canonicalize(app).ok()?;
     let mut name = icon_file.unwrap_or("AppIcon").to_string();
     if !name.ends_with(".icns") {
@@ -456,7 +456,7 @@ fn load_icon(app: &Path, icon_file: Option<&str>) -> Option<ColorImage> {
 
 /// Newer apps keep their icon in an asset catalog instead of an .icns file.
 /// For those, ask macOS (Quick Look) to render the icon Finder shows.
-fn system_icon(app: &Path) -> Option<ColorImage> {
+pub fn system_icon(app: &Path) -> Option<ColorImage> {
     let dir = std::env::temp_dir().join(format!("macsweep-icons-{}", std::process::id()));
     std::fs::create_dir_all(&dir).ok()?;
     Command::new("/usr/bin/qlmanage")
@@ -474,7 +474,16 @@ fn system_icon(app: &Path) -> Option<ColorImage> {
 }
 
 fn decode_png(path: &Path) -> Option<ColorImage> {
-    let mut dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
+    decode_png_from(std::io::BufReader::new(std::fs::File::open(path).ok()?))
+}
+
+/// A PNG held in memory (e.g. a website's icon from the browser's database).
+pub fn decode_png_bytes(bytes: &[u8]) -> Option<ColorImage> {
+    decode_png_from(std::io::Cursor::new(bytes))
+}
+
+fn decode_png_from<R: std::io::BufRead + std::io::Seek>(reader: R) -> Option<ColorImage> {
+    let mut dec = png::Decoder::new(reader);
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut r = dec.read_info().ok()?;
     let mut buf = vec![0u8; r.output_buffer_size()?];

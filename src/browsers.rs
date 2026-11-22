@@ -18,65 +18,75 @@ use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 /// Browsers built on Chromium, which all lay their files out the same way.
-/// (name, bundle id, data folder, cache folder) — folders relative to ~/Library.
-const CHROMIUM: &[(&str, &str, &str, &str)] = &[
+/// (name, bundle id, app, data folder, cache folder) — folders relative to ~/Library.
+const CHROMIUM: &[(&str, &str, &str, &str, &str)] = &[
     (
         "Chrome",
         "com.google.Chrome",
+        "Google Chrome.app",
         "Application Support/Google/Chrome",
         "Caches/Google/Chrome",
     ),
     (
         "Chrome Beta",
         "com.google.Chrome.beta",
+        "Google Chrome Beta.app",
         "Application Support/Google/Chrome Beta",
         "Caches/Google/Chrome Beta",
     ),
     (
         "Chrome Canary",
         "com.google.Chrome.canary",
+        "Google Chrome Canary.app",
         "Application Support/Google/Chrome Canary",
         "Caches/Google/Chrome Canary",
     ),
     (
         "Brave",
         "com.brave.Browser",
+        "Brave Browser.app",
         "Application Support/BraveSoftware/Brave-Browser",
         "Caches/BraveSoftware/Brave-Browser",
     ),
     (
         "Edge",
         "com.microsoft.edgemac",
+        "Microsoft Edge.app",
         "Application Support/Microsoft Edge",
         "Caches/Microsoft Edge",
     ),
     (
         "Arc",
         "company.thebrowser.Browser",
+        "Arc.app",
         "Application Support/Arc/User Data",
         "Caches/Arc/User Data",
     ),
     (
         "Vivaldi",
         "com.vivaldi.Vivaldi",
+        "Vivaldi.app",
         "Application Support/Vivaldi",
         "Caches/Vivaldi",
     ),
     (
         "Opera",
         "com.operasoftware.Opera",
+        "Opera.app",
         "Application Support/com.operasoftware.Opera",
         "Caches/com.operasoftware.Opera",
     ),
     (
         "Opera GX",
         "com.operasoftware.OperaGX",
+        "Opera GX.app",
         "Application Support/com.operasoftware.OperaGX",
         "Caches/com.operasoftware.OperaGX",
     ),
     (
         "Chromium",
         "org.chromium.Chromium",
+        "Chromium.app",
         "Application Support/Chromium",
         "Caches/Chromium",
     ),
@@ -137,6 +147,8 @@ pub struct Item {
     pub detail: String,
     /// The profile it belongs to (None for browser-wide items).
     pub profile: Option<String>,
+    /// That profile's folder, where its website icons are kept.
+    pub profile_dir: Option<PathBuf>,
     pub paths: Vec<PathBuf>,
     pub size: u64,
     pub newest: Option<SystemTime>,
@@ -147,6 +159,8 @@ pub struct Item {
 pub struct Browser {
     pub name: &'static str,
     pub bundle_id: &'static str,
+    /// The browser app itself, for its icon.
+    pub app: Option<PathBuf>,
     pub data: PathBuf,
     pub cache: PathBuf,
     pub profiles: Vec<String>,
@@ -396,6 +410,7 @@ fn scan_profile(data: &Path, cache: &Path, dir: &str, label: &str) -> Vec<Item> 
             title: "Cache".into(),
             detail: breakdown(&cache_parts),
             profile: Some(label.into()),
+            profile_dir: Some(p.clone()),
             paths: cache_paths,
             size,
             newest,
@@ -462,6 +477,7 @@ fn scan_profile(data: &Path, cache: &Path, dir: &str, label: &str) -> Vec<Item> 
                 breakdown(&kinds)
             },
             profile: Some(label.into()),
+            profile_dir: Some(p.clone()),
             size: kinds.iter().map(|(_, s)| s).sum(),
             paths,
             newest,
@@ -471,7 +487,14 @@ fn scan_profile(data: &Path, cache: &Path, dir: &str, label: &str) -> Vec<Item> 
     items
 }
 
-fn scan_browser(name: &'static str, bundle_id: &'static str, data: PathBuf, cache: PathBuf, running: &[String]) -> Browser {
+fn scan_browser(
+    name: &'static str,
+    bundle_id: &'static str,
+    app: Option<PathBuf>,
+    data: PathBuf,
+    cache: PathBuf,
+    running: &[String],
+) -> Browser {
     let mut items = Vec::new();
 
     // AI models (browser-wide).
@@ -501,6 +524,7 @@ fn scan_browser(name: &'static str, bundle_id: &'static str, data: PathBuf, cach
             title,
             detail: format!("{what}{version} Folder: {folder}"),
             profile: None,
+            profile_dir: None,
             paths: vec![e],
             size,
             newest,
@@ -526,6 +550,7 @@ fn scan_browser(name: &'static str, bundle_id: &'static str, data: PathBuf, cach
             title: "Graphics cache".into(),
             detail: "Shared by all profiles".into(),
             profile: None,
+            profile_dir: None,
             paths: shared.into_iter().map(|(_, _, p)| p).collect(),
             size,
             newest,
@@ -553,6 +578,7 @@ fn scan_browser(name: &'static str, bundle_id: &'static str, data: PathBuf, cach
         name,
         bundle_id,
         running: running.contains(&bundle_id.to_lowercase()),
+        app,
         data,
         cache,
         profiles: labels,
@@ -566,9 +592,8 @@ pub fn scan() -> Vec<Browser> {
     let running = crate::junk::running_apps();
     CHROMIUM
         .iter()
-        .map(|(n, id, d, c)| (n, id, lib.join(d), lib.join(c)))
-        .filter(|(_, _, d, _)| d.is_dir())
-        .map(|(n, id, d, c)| scan_browser(n, id, d, c, &running))
+        .filter(|(_, _, _, d, _)| lib.join(d).is_dir())
+        .map(|(n, id, app, d, c)| scan_browser(n, id, find_app(id, app), lib.join(d), lib.join(c), &running))
         .collect()
 }
 
@@ -611,6 +636,87 @@ pub fn report(browsers: &[Browser]) -> String {
         }
     }
     out
+}
+
+/// Where the browser app is: the usual places first, then Spotlight.
+fn find_app(bundle_id: &str, app: &str) -> Option<PathBuf> {
+    let usual = [
+        PathBuf::from("/Applications").join(app),
+        fsutil::home().join("Applications").join(app),
+    ];
+    if let Some(p) = usual.into_iter().find(|p| p.is_dir()) {
+        return Some(p);
+    }
+    let out = std::process::Command::new("/usr/bin/mdfind")
+        .arg(format!("kMDItemCFBundleIdentifier == '{bundle_id}'"))
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(PathBuf::from)
+        .find(|p| p.extension().is_some_and(|e| e == "app") && p.is_dir())
+}
+
+/// The browser's app icon file name, from its Info.plist.
+pub fn app_icon_file(app: &Path) -> Option<String> {
+    let v = plist::Value::from_file(app.join("Contents/Info.plist")).ok()?;
+    v.as_dictionary()?.get("CFBundleIconFile")?.as_string().map(str::to_owned)
+}
+
+/// Website icons a profile has already saved, by website: the PNG closest
+/// to 32 px for each. Read from the browser's own "Favicons" database,
+/// opened read-only and as immutable, so it is never changed or locked.
+/// Nothing is fetched from the internet.
+pub fn favicons(profile_dir: &Path) -> HashMap<String, Vec<u8>> {
+    let mut out: HashMap<String, (i64, Vec<u8>)> = HashMap::new();
+    let db = profile_dir.join("Favicons");
+    if !db.is_file() {
+        return HashMap::new();
+    }
+    // A file: URI, with the characters URIs reserve escaped.
+    let mut uri = String::from("file:");
+    for c in db.to_string_lossy().chars() {
+        match c {
+            ' ' => uri.push_str("%20"),
+            '%' => uri.push_str("%25"),
+            '?' => uri.push_str("%3F"),
+            '#' => uri.push_str("%23"),
+            c => uri.push(c),
+        }
+    }
+    uri.push_str("?immutable=1");
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI;
+    let Ok(conn) = rusqlite::Connection::open_with_flags(&uri, flags) else {
+        return HashMap::new();
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT m.page_url, b.width, b.image_data FROM icon_mapping m \
+         JOIN favicon_bitmaps b ON b.icon_id = m.icon_id \
+         WHERE b.width BETWEEN 16 AND 128 AND length(b.image_data) > 0",
+    ) else {
+        return HashMap::new();
+    };
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, Vec<u8>>(2)?))
+    });
+    let Ok(rows) = rows else { return HashMap::new() };
+    for (url, width, png) in rows.flatten() {
+        let Some(host) = url_host(&url) else { continue };
+        let better = out.get(&host).is_none_or(|(w, _)| (width - 32).abs() < (w - 32).abs());
+        if better {
+            out.insert(host, (width, png));
+        }
+    }
+    out.into_iter().map(|(h, (_, png))| (h, png)).collect()
+}
+
+/// The icon for a website, also trying it with and without "www.".
+pub fn favicon_for<'a>(icons: &'a HashMap<String, Vec<u8>>, host: &str) -> Option<&'a Vec<u8>> {
+    let bare = host.strip_prefix("www.").unwrap_or(host);
+    icons
+        .get(host)
+        .or_else(|| icons.get(bare))
+        .or_else(|| icons.get(&format!("www.{bare}")))
 }
 
 /// Is this browser open right now? Checked again right before cleaning.
@@ -835,7 +941,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("ms-browsers-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (data, cache) = fake(&root);
-        let b = scan_browser("Chrome", "com.google.Chrome", data, cache, &[]);
+        let b = scan_browser("Chrome", "com.google.Chrome", None, data, cache, &[]);
         assert_eq!(b.profiles, vec!["Nihal (Default)".to_string()]);
         let titles: Vec<(Group, &str)> = b.items.iter().map(|i| (i.group, i.title.as_str())).collect();
         assert!(titles.contains(&(Group::Model, "Scam detection model")));
@@ -902,6 +1008,36 @@ mod tests {
         assert!(allowed(&data, &cache, &p.join("Code Cache")));
         assert!(allowed(&data, &cache, &cache.join("Default/Cache")));
         assert!(allowed(&data, &cache, &data.join("OptGuideOnDeviceModel")));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn website_icons_come_from_the_profiles_own_database() {
+        let root = std::env::temp_dir().join(format!("ms browsers fav {}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        {
+            let c = rusqlite::Connection::open(root.join("Favicons")).unwrap();
+            c.execute_batch(
+                "CREATE TABLE icon_mapping(id INTEGER PRIMARY KEY, page_url TEXT, icon_id INTEGER);
+                 CREATE TABLE favicon_bitmaps(id INTEGER PRIMARY KEY, icon_id INTEGER, width INTEGER, image_data BLOB);
+                 INSERT INTO icon_mapping VALUES (1, 'https://web.nfsmwo.com/play', 7), (2, 'https://poki.com/', 8);
+                 INSERT INTO favicon_bitmaps VALUES (1, 7, 16, x'0101'), (2, 7, 32, x'0202'), (3, 7, 256, x'0303'),
+                                                    (4, 8, 64, x'0404');",
+            )
+            .unwrap();
+        }
+        let before = std::fs::read(root.join("Favicons")).unwrap();
+        let icons = favicons(&root);
+        // The 32 px one is picked; sizes outside 16–128 are ignored.
+        assert_eq!(favicon_for(&icons, "web.nfsmwo.com"), Some(&vec![2u8, 2]));
+        assert_eq!(favicon_for(&icons, "www.poki.com"), Some(&vec![4u8, 4]));
+        assert_eq!(favicon_for(&icons, "x.com"), None);
+        // Read only: the database is unchanged and no journal was left behind.
+        assert_eq!(std::fs::read(root.join("Favicons")).unwrap(), before);
+        assert!(!root.join("Favicons-journal").exists() && !root.join("Favicons-wal").exists());
+        // A missing database is simply no icons.
+        assert!(favicons(&root.join("nope")).is_empty());
         std::fs::remove_dir_all(&root).unwrap();
     }
 
