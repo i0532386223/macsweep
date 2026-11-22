@@ -46,6 +46,11 @@ See what each browser keeps on your Mac, sorted into three groups, and choose ex
 - AI models found: 208.7 MB (scam detection model, small feature models, address-bar suggestions). Gemini Nano was not downloaded on this Mac. Turning off On-device AI in Chrome's settings made Chrome delete all of them itself, as Google documents.
 - `MacSweep --browser-report` prints everything the scan finds, with every path, so you can check it on your own Mac. It changes nothing.
 
+### New: update notice
+- When a newer version is published, the sidebar says so and links to its release page. MacSweep asks GitHub once at launch, using macOS's own `curl`; nothing about you or your Mac is sent, and any failure (offline, no answer) is silent.
+- To turn it off, create an empty file at `~/Library/Application Support/MacSweep/no-update-check`.
+- Versions before 0.3.0 can't show this notice. If you know someone on 0.1 or 0.2, point them to the Releases page once.
+
 ### Security
 - Every system command is called by its full path (`/bin/launchctl`, `/usr/bin/osascript` …), so a changed `PATH` can't substitute another program.
 - The "Relaunch" button after granting Full Disk Access quoted the app's path unsafely for the shell; a folder name containing `$` or a backtick could run a command. Fixed.

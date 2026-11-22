@@ -14,6 +14,7 @@ mod monitor;
 mod shared;
 mod theme;
 mod uninstall;
+mod update;
 
 use eframe::egui::{self, Align2, Color32, Layout, Sense, Ui, vec2};
 use job::Job;
@@ -195,6 +196,9 @@ struct App {
     agents: agents::Agents,
     health: health_ui::HealthPane,
     sys: Sys,
+    /// Asking GitHub whether a newer MacSweep exists (once, at launch).
+    update_job: Option<Job<Option<update::Release>>>,
+    new_release: Option<update::Release>,
 }
 
 impl App {
@@ -215,6 +219,8 @@ impl App {
             agents: Default::default(),
             health: Default::default(),
             sys: Sys::new(),
+            update_job: Some(Job::spawn(&cc.egui_ctx, |_, _| update::check())),
+            new_release: None,
         }
     }
 
@@ -313,6 +319,31 @@ impl App {
                                 }
                             });
                             });
+                        });
+                }
+
+                if let Some(r) = job::poll(&mut self.update_job, ui.ctx()) {
+                    self.new_release = r;
+                }
+                if let Some(r) = &self.new_release {
+                    ui.add_space(10.0);
+                    egui::Frame::new()
+                        .fill(self.pane.palette().accent.gamma_multiply(0.35))
+                        .corner_radius(10)
+                        .inner_margin(8)
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(theme::semi(
+                                format!("{}  MacSweep {} is available", icon::ARROW_CIRCLE_UP, r.version),
+                                12.5,
+                            ));
+                            ui.label(theme::dim(
+                                format!("You have {}. See what's new and download it.", env!("CARGO_PKG_VERSION")),
+                                11.0,
+                            ));
+                            if ui.link(theme::text("Open the release page", 12.0)).clicked() {
+                                fsutil::open(&r.url);
+                            }
                         });
                 }
 

@@ -43,6 +43,7 @@ pub mod icon {
     pub const BATTERY_CHARGING: &str = "\u{E0BA}";
     pub const HEART: &str = "\u{E2A8}";
     pub const GLOBE: &str = "\u{E288}";
+    pub const ARROW_CIRCLE_UP: &str = "\u{E030}";
     pub const GAME_CONTROLLER: &str = "\u{E26E}";
 }
 

@@ -26,7 +26,7 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 - **Free and open source.** No subscription, no ads, no "upgrade to clean" paywall. Every line is right here.
 - **Safe by design.** It never touches your browser profiles, email, passwords or app data (see [Safety](#safety--your-data-is-never-touched)).
 - **Tiny and fast.** One native Rust binary of about 7 MB. Scans use every CPU core, and nothing runs in the background unless you turn on the menu bar monitor.
-- **Private.** No accounts, no telemetry, no network access. Everything happens on your Mac.
+- **Private.** No accounts, no telemetry. Everything happens on your Mac. The only network request is one check at launch asking GitHub whether a newer version exists; nothing about you or your Mac is sent. To turn it off, create an empty file at `~/Library/Application Support/MacSweep/no-update-check`.
 
 ## Features
 
