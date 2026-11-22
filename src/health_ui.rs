@@ -330,7 +330,7 @@ impl HealthPane {
                     ui,
                     "Memory in use",
                     mem,
-                    "Activity Monitor's Memory Used: pages in use, minus cached files macOS can drop instantly.",
+                    "Activity Monitor's Memory Used: all memory minus free memory and cached files macOS can drop instantly.",
                 );
                 let swap = match (s.swap_used, s.swap_total) {
                     (Some(0), _) => "None".to_string(),

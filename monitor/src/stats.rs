@@ -72,22 +72,21 @@ impl Pressure {
 /// Page counts from the kernel's VM statistics.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PageCounts {
-    pub active: u64,
-    pub inactive: u64,
-    pub speculative: u64,
-    pub wired: u64,
-    pub compressed: u64,
-    pub purgeable: u64,
+    /// All physical memory, in pages.
+    pub total: u64,
+    /// Free pages (the kernel's free count, which includes speculative pages).
+    pub free: u64,
     /// File-backed pages: the "Cached Files" macOS can drop at once.
     pub file_backed: u64,
+    pub purgeable: u64,
 }
 
-/// Activity Monitor's "Memory Used": every page in use, minus cached files
-/// and purgeable memory that macOS can reclaim instantly. Checked against
-/// Activity Monitor on a MacBook Air M1: App + Wired + Compressed gave 6.33 GB
-/// where it showed 6.89 GB, so that simpler sum is not what it reports.
+/// Activity Monitor's "Memory Used": all physical memory minus free memory
+/// and cached files. Checked on a MacBook Air M1 in two side-by-side readings
+/// (6.89 and 6.63 GB). Adding up app + wired + compressed gave about 0.55 GB
+/// less, because some memory in use isn't listed in any of those categories.
 pub fn memory_used_pages(p: PageCounts) -> u64 {
-    (p.active + p.inactive + p.speculative + p.wired + p.compressed).saturating_sub(p.purgeable + p.file_backed)
+    p.total.saturating_sub(p.free + p.file_backed + p.purgeable)
 }
 
 /// CPU busy share between two tick samples, 0–100.
@@ -235,13 +234,10 @@ mod mac {
                 return 0;
             }
             super::memory_used_pages(super::PageCounts {
-                active: v.active_count.into(),
-                inactive: v.inactive_count.into(),
-                speculative: v.speculative_count.into(),
-                wired: v.wire_count.into(),
-                compressed: v.compressor_page_count.into(),
-                purgeable: v.purgeable_count.into(),
+                total: self.ram_total / self.page,
+                free: v.free_count.into(),
                 file_backed: v.external_page_count.into(),
+                purgeable: v.purgeable_count.into(),
             }) * self.page
         }
     }
@@ -329,18 +325,18 @@ mod tests {
     }
 
     #[test]
-    fn memory_used_leaves_out_what_macos_can_reclaim() {
+    fn memory_used_matches_activity_monitor() {
+        // Activity Monitor on a MacBook Air M1 (16 KB pages): Physical 8.00 GB,
+        // Cached Files 1.31 GB, about 0.06 GB free → Memory Used 6.63 GB.
+        let gib = |pages: u64| pages as f64 * 16384.0 / 1_073_741_824.0;
         let p = PageCounts {
-            active: 100,
-            inactive: 50,
-            speculative: 10,
-            wired: 80,
-            compressed: 200,
-            purgeable: 5,
-            file_backed: 60,
+            total: 524_288,
+            free: 3_932,
+            file_backed: 80_000,
+            purgeable: 5_852,
         };
-        assert_eq!(memory_used_pages(p), 375);
-        assert_eq!(memory_used_pages(PageCounts { purgeable: 9_999, ..p }), 0, "never negative");
+        assert_eq!(format!("{:.2}", gib(memory_used_pages(p))), "6.63");
+        assert_eq!(memory_used_pages(PageCounts { free: 600_000, ..p }), 0, "never negative");
     }
 
     #[test]
