@@ -25,7 +25,7 @@ Clean junk, find big forgotten files and duplicates, fully uninstall apps, clean
 
 - **Free and open source.** No subscription, no ads, no "upgrade to clean" paywall. Every line is right here.
 - **Safe by design.** It never touches your passwords, cookies, browser history, email or app data, and only removes a website's data if you tick that site (see [Safety](#safety--your-data-is-never-touched)).
-- **Tiny and fast.** A native Rust app, under 7 MB on Apple Silicon. It uses macOS's own fonts instead of bundling them. Scans use every CPU core, and nothing runs in the background unless you turn on the menu bar monitor.
+- **Tiny and fast.** A native Rust app: a 7 MB download that runs on both Apple Silicon and Intel (6.6 MB if built for Apple Silicon only). It uses macOS's own fonts instead of bundling them. Scans use every CPU core, and nothing runs in the background unless you turn on the menu bar monitor.
 - **Private.** No accounts, no telemetry. Everything happens on your Mac. The only network request is one check at launch asking GitHub whether a newer version exists; nothing about you or your Mac is sent. To turn it off, create an empty file at `~/Library/Application Support/MacSweep/no-update-check`.
 
 ## Features
