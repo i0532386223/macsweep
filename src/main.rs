@@ -12,6 +12,7 @@ mod leveldb;
 mod monitor;
 #[path = "../monitor/src/shared.rs"]
 mod shared;
+mod smc;
 mod theme;
 mod uninstall;
 
@@ -603,6 +604,11 @@ impl eframe::App for App {
 fn main() -> eframe::Result {
     // `MacSweep --health-report` prints the Mac Health values and exits.
     // scripts/validate-health.sh compares them with Apple's own tools.
+    // `MacSweep --smc-probe` reads (never writes) the charging keys.
+    if std::env::args().any(|a| a == "--smc-probe") {
+        print!("{}", smc::probe_all());
+        return Ok(());
+    }
     // `MacSweep --browser-report` lists what Browser Cleanup finds, with paths.
     if std::env::args().any(|a| a == "--browser-report") {
         println!("{}", browsers::report(&browsers::scan()));
