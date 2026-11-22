@@ -260,11 +260,15 @@ pub fn system_now() -> System {
 }
 
 pub fn collect() -> Health {
+    // One system_profiler run for both reports: it's the slow part (~1 s each).
+    let profile = run("system_profiler", &["SPPowerDataType", "SPNVMeDataType"])
+        .map(|t| String::from_utf8_lossy(&t).into_owned())
+        .unwrap_or_default();
     let battery = run("ioreg", &["-rn", "AppleSmartBattery", "-a"])
         .and_then(|x| parse_ioreg_battery(&x))
         .map(|mut b| {
-            if let Some(text) = run("system_profiler", &["SPPowerDataType"]) {
-                let (pct, cond, cycles) = parse_power(&String::from_utf8_lossy(&text));
+            if let Some(power) = section(&profile, "Power:") {
+                let (pct, cond, cycles) = parse_power(power);
                 b.max_capacity_pct = pct;
                 b.condition = cond;
                 b.cycles = cycles.or(b.cycles);
@@ -272,12 +276,12 @@ pub fn collect() -> Health {
             b
         });
     let mut disk = Disk::default();
-    if let Some(text) = run("system_profiler", &["SPNVMeDataType"]) {
-        let (model, cap, status) = parse_nvme_profiler(&String::from_utf8_lossy(&text));
+    if let Some(nvme) = section(&profile, "NVMExpress:") {
+        let (model, capacity_bytes, smart_status) = parse_nvme_profiler(nvme);
         disk = Disk {
             model,
-            capacity_bytes: cap,
-            smart_status: status,
+            capacity_bytes,
+            smart_status,
             smart: None,
         };
     }
@@ -287,6 +291,23 @@ pub fn collect() -> Health {
         disk,
         system: mac::system(),
     }
+}
+
+/// One report ("Power:", "NVMExpress:") out of a combined system_profiler
+/// output: from its heading to the next unindented heading.
+pub fn section<'a>(text: &'a str, heading: &str) -> Option<&'a str> {
+    let start = text.lines().position(|l| l == heading)?;
+    let mut offset = 0;
+    let mut begin = None;
+    for (n, line) in text.split_inclusive('\n').enumerate() {
+        if n == start {
+            begin = Some(offset);
+        } else if begin.is_some() && !line.starts_with(' ') && line.trim_end().ends_with(':') {
+            return Some(&text[begin?..offset]);
+        }
+        offset += line.len();
+    }
+    begin.map(|b| &text[b..])
 }
 
 #[path = "../monitor/src/stats.rs"]
@@ -658,6 +679,23 @@ mod tests {
         let raw = b.raw_max_mah.unwrap() * 100 / b.design_mah.unwrap();
         assert_eq!((nominal, raw), (89, 86));
         assert_eq!(b.max_capacity_pct, None, "only system_profiler supplies it");
+    }
+
+    #[test]
+    fn combined_system_profiler_output_is_split_correctly() {
+        let power = String::from_utf8(fixture("system_profiler-power.txt")).unwrap();
+        let nvme = String::from_utf8(fixture("system_profiler-storage.txt")).unwrap();
+        for combined in [format!("{power}\n{nvme}"), format!("{nvme}\n{power}")] {
+            let p = section(&combined, "Power:").unwrap();
+            let n = section(&combined, "NVMExpress:").unwrap();
+            assert_eq!(parse_power(p), (Some(90), Some("Normal".into()), Some(290)));
+            let (model, cap, status) = parse_nvme_profiler(n);
+            assert_eq!(model.as_deref(), Some("APPLE SSD AP0256Q"));
+            assert_eq!(cap, Some(251_000_193_024));
+            assert_eq!(status.as_deref(), Some("Verified"));
+            assert!(!p.contains("NVMExpress:") && !n.contains("Power:"));
+        }
+        assert_eq!(section("Other:\n  x: 1\n", "Power:"), None);
     }
 
     #[test]
