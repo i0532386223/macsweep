@@ -24,7 +24,7 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 ## Why MacSweep?
 
 - **Free and open source.** No subscription, no ads, no "upgrade to clean" paywall. Every line is right here.
-- **Safe by design.** It never touches your browser profiles, email, passwords or app data (see [Safety](#safety--your-data-is-never-touched)).
+- **Safe by design.** It never touches your passwords, cookies, browser history, email or app data, and only removes a website's data if you tick that site (see [Safety](#safety--your-data-is-never-touched)).
 - **Tiny and fast.** One native Rust binary of about 7 MB. Scans use every CPU core, and nothing runs in the background unless you turn on the menu bar monitor.
 - **Private.** No accounts, no telemetry. Everything happens on your Mac. The only network request is one check at launch asking GitHub whether a newer version exists; nothing about you or your Mac is sent. To turn it off, create an empty file at `~/Library/Application Support/MacSweep/no-update-check`.
 
@@ -37,6 +37,7 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 | 📁 **Large & Old Files** | Finds big files in your home folder, grouped by kind (videos, archives, installers, models & data…), with a "not opened in a year" filter. |
 | 🗂️ **Duplicates** | Finds exact duplicate files (same size and same BLAKE3 content hash) in Desktop, Documents, Downloads, Pictures, Movies and Music. Always keeps at least one copy, never looks inside Photos/Music libraries or app data, and moves extras to the Trash. |
 | 📦 **Uninstaller** | Every app with its icon, version, App Store / Apple Silicon / Intel badges, last-opened date and **true size including leftovers**. Select several apps at once. |
+| 🌐 **Browser Cleanup** | For Chrome, Brave, Edge, Arc, Vivaldi, Opera and Chromium: the AI models each browser downloaded (like Chrome's Gemini Nano), website data per site and profile (where **web games keep their saves**, never ticked for you) and cache. Filter by profile, search and sort. Passwords, cookies, history, bookmarks and sign-ins are never touched. |
 | 🚀 **Launch Agents** | Lists background helpers and flags **orphaned** ones whose app is already gone. |
 | ❤️ **Mac Health** | Battery health (Apple's own Maximum Capacity and Condition, cycle count), SSD health (lifespan used, spare blocks, data written, errors) and system details. Every value comes from macOS itself and is [validated against Apple's tools](docs/health-validation.md). |
 | 📊 **Menu bar monitor** | Optional and off by default: live CPU, memory and free disk space in the menu bar, from a separate tiny helper. [Measured cost](CHANGELOG.md#v030): 2.2% of one core at live updates, 0.5% at every 5 s. |
@@ -91,12 +92,13 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 Some cleaners have wiped people's browser profiles and email. MacSweep is built so that **can't happen**:
 
 - **Allowlist, not blocklist.** Junk cleaning can only delete *inside* a fixed list of cache, log and build folders (`JUNK_ROOTS` in [`src/fsutil.rs`](src/fsutil.rs)). Every path is checked again right before deletion.
-- **Never touched:** browser profiles (Chrome, Brave, Firefox, Safari: history, passwords, bookmarks, logins), Mail, Messages, Keychains, cookies, app containers, `~/Library/Application Support`, and your documents. For browsers, only the disposable download cache is cleaned.
+- **Never touched by junk cleaning:** browser profiles (Chrome, Brave, Firefox, Safari: history, passwords, bookmarks, logins), Mail, Messages, Keychains, cookies, app containers, `~/Library/Application Support`, and your documents. For browsers, only the disposable download cache is cleaned.
+- **Browser Cleanup only removes what you tick.** It can remove a browser's AI models, cache, and a website's stored data (its databases, offline files and file storage, where web games keep saves), but website data is never ticked for you and goes to the Trash. Passwords, cookies, history, bookmarks, extensions' data and Local Storage (where sign-ins live) are never listed and can't be removed: an allowlist refuses any other folder. A browser that is open is never cleaned.
 - **Sign-in and sync caches are skipped:** iCloud, CloudKit, Apple ID, Wallet, Family, and anything named like a password manager, token, auth, account or login.
 - **The Uninstaller keeps your data unless you ask.** Leftovers are split into *safe to remove* (cache, logs, preferences, window state) and **Your data** (profiles, containers, cookies, web storage), which is never pre-selected.
-- **Recoverable by default.** Apps, large files and launch agents go to the Trash. Only junk is deleted permanently, after you click Clean.
+- **Recoverable by default.** Apps, large files, launch agents, and browsers' AI models and website data go to the Trash. Only junk and browser cache are deleted permanently, after you click Clean.
 - Apple's own apps are never listed in the Uninstaller.
-- Automated tests (`cargo test`) check that browser profiles, Mail, keychains, cookies, Documents and `../` path tricks can never be deleted.
+- Automated tests (`cargo test`) check that browser profiles, Mail, keychains, cookies, Documents and `../` path tricks can never be deleted by junk cleaning, and that Browser Cleanup refuses passwords, cookies, Local Storage, extensions' data and the profile itself.
 
 ## Build from source
 
@@ -113,7 +115,8 @@ UNIVERSAL=1 ./bundle.sh     # Apple Silicon + Intel in one app
 - [x] Duplicate file finder (v0.2)
 - [x] Menu-bar mini monitor (disk, RAM, CPU) (v0.3)
 - [x] Mac Health: battery, SSD and system health (v0.3)
-- [ ] Browser cache cleanup per browser (cache only, never profiles)
+- [x] Browser Cleanup: AI models, website data and cache per browser and profile (v0.3)
+- [ ] Firefox and Safari in Browser Cleanup
 - [ ] Scheduled scans and reminders
 - [ ] Homebrew install (`brew install --cask macsweep`)
 - [ ] Notarized builds

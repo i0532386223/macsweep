@@ -10,7 +10,7 @@
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MacSweep by nihal4 – Free, Open-Source Mac Cleaner in Rust (CleanMyMac Alternative)</title>
-<meta name="description" content="MacSweep is a free, open-source Mac cleaner written in Rust. Clean junk and caches, find large and duplicate files, fully uninstall apps and remove orphaned launch agents, without ever touching your browser profiles, email or app data.">
+<meta name="description" content="MacSweep is a free, open-source Mac cleaner written in Rust. Clean junk and caches, find large and duplicate files, fully uninstall apps, clean browsers site by site and check battery and SSD health, without ever touching your passwords, email or app data.">
 <meta name="keywords" content="MacSweep, nihal4, Mac cleaner, free Mac cleaner, open source Mac cleaner, CleanMyMac alternative, Mole alternative, Mac uninstaller, clean Mac cache, Rust macOS app">
 <meta name="author" content="S. M. Nihal Ahmed (nihal4)">
 <link rel="canonical" href="https://macsweep-app.netlify.app/">
@@ -37,7 +37,7 @@
   "@type": "SoftwareApplication",
   "name": "MacSweep",
   "alternateName": "MacSweep by nihal4",
-  "description": "Free, open-source Mac cleaner written in Rust. Cleans junk and caches, finds large and old files and exact duplicates, fully uninstalls apps with their leftovers and removes orphaned launch agents, while never deleting browser profiles, email or app data.",
+  "description": "Free, open-source Mac cleaner written in Rust. Cleans junk and caches, finds large and old files and exact duplicates, fully uninstalls apps with their leftovers, cleans browsers site by site (AI models, website data, cache) and shows battery and SSD health, while never deleting passwords, cookies, browser history, email or app data.",
   "applicationCategory": "UtilitiesApplication",
   "operatingSystem": "macOS 11 or later (Apple Silicon and Intel)",
   "softwareVersion": "0.3.0",
@@ -60,8 +60,8 @@
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
-    {"@type": "Question", "name": "Is MacSweep free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. MacSweep is completely free and open source under the MIT license. There is no subscription, no paid tier, no ads and no telemetry."}},
-    {"@type": "Question", "name": "Is MacSweep safe? Will it delete my browser profiles or email?", "acceptedAnswer": {"@type": "Answer", "text": "No. Junk cleaning can only delete inside a fixed allowlist of cache, log and build folders, and every path is checked again right before deletion. Browser profiles (Chrome, Brave, Firefox, Safari), Mail, Messages, keychains, cookies, app containers and your documents are never touched, and automated tests guard this. Uninstalled apps, large files and launch agents go to the Trash, so you can restore them."}},
+    {"@type": "Question", "name": "Is MacSweep free?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. MacSweep is completely free and open source under the MIT license. There is no subscription, no paid tier, no ads and no telemetry. Its only network request is a check at launch for a newer version on GitHub, which sends nothing about you."}},
+    {"@type": "Question", "name": "Is MacSweep safe? Will it delete my browser profiles or email?", "acceptedAnswer": {"@type": "Answer", "text": "No. Junk cleaning can only delete inside a fixed allowlist of cache, log and build folders, and every path is checked again right before deletion. Browser profiles (Chrome, Brave, Firefox, Safari), Mail, Messages, keychains, cookies, app containers and your documents are never touched by junk cleaning, and automated tests guard this. Browser Cleanup only removes what you tick, never passwords, cookies, history or bookmarks. Uninstalled apps, large files, launch agents and website data go to the Trash, so you can restore them."}},
     {"@type": "Question", "name": "How is MacSweep different from Mole?", "acceptedAnswer": {"@type": "Answer", "text": "Mole is an excellent, much more mature open-source Mac cleaner, but its free version is a command-line tool. Its graphical app, Mole for Mac, is a separate paid product that requires macOS 14 or later. MacSweep is a free, open-source graphical app that runs on macOS 11 or later."}},
     {"@type": "Question", "name": "Is MacSweep a CleanMyMac alternative?", "acceptedAnswer": {"@type": "Answer", "text": "Yes. MacSweep covers the core CleanMyMac jobs of cleaning system junk, finding large files, uninstalling apps with their leftovers and managing launch agents, for free and as open source. CleanMyMac has many more features, such as malware scanning and performance tools."}},
     {"@type": "Question", "name": "Which Macs does MacSweep support?", "acceptedAnswer": {"@type": "Answer", "text": "MacSweep is a universal app that runs natively on Apple Silicon (M1, M2, M3, M4 and later) and Intel Macs with macOS 11 Big Sur or later."}},
@@ -222,7 +222,7 @@
   <div class="wrap hero">
     <div>
       <h1>The Mac cleaner that leaves your data alone.</h1>
-      <p class="lede">MacSweep is a free, open-source Mac cleaner written in Rust. It clears junk, finds forgotten large files and fully uninstalls apps, and it can never delete your browser profiles, email or app data.</p>
+      <p class="lede">MacSweep is a free, open-source Mac cleaner written in Rust. It clears junk, finds forgotten large files and fully uninstalls apps, and it can never delete your passwords, email or app data.</p>
       <div class="actions">
         <a class="btn btn-primary" href="https://github.com/nihal4/macsweep/releases/latest">Download for Mac</a>
         <a class="btn btn-ghost" href="https://github.com/nihal4/macsweep">View source on GitHub</a>
@@ -236,7 +236,7 @@
   <section id="safety">
     <div class="wrap">
       <h2>What it cleans, and what it never touches</h2>
-      <p class="intro">Some cleaners have wiped people's browser profiles and mailboxes. MacSweep can only delete inside a fixed list of disposable folders, and it checks every path again right before deleting. Automated tests guard the right-hand column.</p>
+      <p class="intro">Some cleaners have wiped people's browser profiles and mailboxes. MacSweep's junk cleaning can only delete inside a fixed list of disposable folders, and it checks every path again right before deleting. Browser Cleanup removes only what you tick. Automated tests guard the right-hand column.</p>
       <div class="ledger">
         <div>
           <h3>Cleans</h3>
@@ -254,7 +254,7 @@
           <h3>Never touches</h3>
           <p>Your accounts, history and saved work.</p>
           <ul>
-            <li>Chrome and Brave profiles <span>Application Support</span></li>
+            <li>Browser passwords, cookies and history <span>Chrome, Brave, Edge, Arc</span></li>
             <li>Firefox and Safari data <span>Profiles, ~/Library/Safari</span></li>
             <li>Mail and Messages <span>~/Library/Mail</span></li>
             <li>Passwords and keychains <span>~/Library/Keychains</span></li>
@@ -269,7 +269,7 @@
   <section id="features">
     <div class="wrap">
       <h2>Everything a Mac cleaner should do</h2>
-      <p class="intro">Cleaning tools plus Mac Health in one small native app. Nothing runs in the background unless you turn on the optional menu bar monitor.</p>
+      <p class="intro">Cleaning tools, Browser Cleanup and Mac Health in one small native app. Nothing runs in the background unless you turn on the optional menu bar monitor.</p>
       <div class="features">
         <div class="feature">
           <img src="system-junk.jpg" alt="System Junk screen listing cache, log and Xcode categories with sizes and checkboxes" loading="lazy">
@@ -343,11 +343,11 @@
       <h2>Questions</h2>
       <details>
         <summary>Is MacSweep free?</summary>
-        <p>Yes. MacSweep is completely free and open source under the MIT license. There's no subscription, no paid tier, no ads and no telemetry.</p>
+        <p>Yes. MacSweep is completely free and open source under the MIT license. There's no subscription, no paid tier, no ads and no telemetry. Its only network request is a check at launch for a newer version on GitHub, which sends nothing about you.</p>
       </details>
       <details>
         <summary>Will it delete my browser profiles or email?</summary>
-        <p>No. Junk cleaning can only delete inside a fixed allowlist of cache, log and build folders, and every path is checked again right before deletion. Browser profiles, Mail, Messages, keychains, cookies, app containers and documents are never touched, and automated tests guard this. Uninstalled apps, large files and launch agents go to the Trash, so you can put them back.</p>
+        <p>No. Junk cleaning can only delete inside a fixed allowlist of cache, log and build folders, and every path is checked again right before deletion. Browser profiles, Mail, Messages, keychains, cookies, app containers and documents are never touched by it, and automated tests guard this. Browser Cleanup removes a website's data only if you tick that site, and never passwords, cookies, history or bookmarks. Uninstalled apps, large files, launch agents and website data go to the Trash, so you can put them back.</p>
       </details>
       <details>
         <summary>How is it different from Mole?</summary>
