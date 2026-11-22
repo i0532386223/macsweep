@@ -10,6 +10,10 @@ use eframe::egui::{self, Color32, Layout, Ui};
 pub struct HealthPane {
     data: Option<Health>,
     load: Option<Job<Health>>,
+    /// Memory, pressure, swap and thermal state change within seconds, so
+    /// they are re-read every 2 s while this screen is open.
+    live: Option<Job<health::System>>,
+    live_at: f64,
     pub monitor: Monitor,
 }
 
@@ -32,9 +36,10 @@ fn line(ui: &mut Ui, label: &str, value: String, hint: &str) {
     ui.end_row();
 }
 
-/// Memory sizes the way Activity Monitor shows them (1 GB = 1024³ bytes).
+/// Memory sizes exactly as Activity Monitor shows them (1 GB = 1024³ bytes,
+/// two decimals), so the two can be compared directly.
 fn fmt_mem(b: u64) -> String {
-    format!("{:.1} GB", b as f64 / 1_073_741_824.0)
+    format!("{:.2} GB", b as f64 / 1_073_741_824.0)
 }
 
 fn na() -> String {
@@ -64,6 +69,17 @@ impl HealthPane {
         if let Some(h) = job::poll(&mut self.load, &ctx) {
             self.data = Some(h);
         }
+        let now = ctx.input(|i| i.time);
+        if self.data.is_some() && self.load.is_none() && self.live.is_none() && now - self.live_at > 2.0 {
+            self.live_at = now;
+            self.live = Some(Job::spawn(&ctx, |_, _| health::system_now()));
+        }
+        if let Some(sys) = job::poll(&mut self.live, &ctx) {
+            if let Some(d) = &mut self.data {
+                d.system = sys;
+            }
+        }
+        ctx.request_repaint_after(std::time::Duration::from_secs(2));
 
         ui.horizontal(|ui| {
             theme::icon_tile(ui, icon::HEART, p.accent, 46.0);
@@ -295,6 +311,7 @@ impl HealthPane {
             ui.horizontal(|ui| {
                 theme::icon_tile(ui, icon::CPU, Color32::from_rgb(0x96, 0x82, 0xff), 34.0);
                 ui.label(theme::semi("System", 15.0));
+                ui.label(theme::dim("· memory and temperature state update live", 12.0));
             });
             ui.add_space(8.0);
             grid(ui, "system_grid", |ui| {

@@ -253,6 +253,12 @@ fn run(cmd: &str, args: &[&str]) -> Option<Vec<u8>> {
 
 /// Reads everything. Takes about a second (system_profiler), so call it off
 /// the UI thread.
+/// Just the fast-changing system readings (memory, pressure, swap, thermal
+/// state): a few sysctl calls, cheap enough to repeat every few seconds.
+pub fn system_now() -> System {
+    mac::system()
+}
+
 pub fn collect() -> Health {
     let battery = run("ioreg", &["-rn", "AppleSmartBattery", "-a"])
         .and_then(|x| parse_ioreg_battery(&x))
