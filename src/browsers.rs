@@ -572,6 +572,47 @@ pub fn scan() -> Vec<Browser> {
         .collect()
 }
 
+/// Plain-text listing of everything the scan found, with every path, for
+/// `MacSweep --browser-report`. Reads only.
+pub fn report(browsers: &[Browser]) -> String {
+    let home = fsutil::home();
+    let mut out = String::new();
+    for b in browsers {
+        out.push_str(&format!(
+            "\n=== {} — {} — profiles: {}{}\n",
+            b.name,
+            fsutil::fmt_size(b.total()),
+            b.profiles.join(", "),
+            if b.running { " — OPEN NOW" } else { "" }
+        ));
+        for g in [Group::Model, Group::Site, Group::Junk] {
+            let name = match g {
+                Group::Model => "AI models",
+                Group::Site => "Website data",
+                Group::Junk => "Cache",
+            };
+            out.push_str(&format!("-- {name}: {}\n", fsutil::fmt_size(b.group_total(g))));
+            for i in b.items.iter().filter(|i| i.group == g) {
+                out.push_str(&format!(
+                    "   {:>9}  {}{}  [{}]\n",
+                    fsutil::fmt_size(i.size),
+                    i.title,
+                    i.profile.as_ref().map(|p| format!(" ({p})")).unwrap_or_default(),
+                    i.detail
+                ));
+                for p in &i.paths {
+                    let shown = p
+                        .strip_prefix(&home)
+                        .map(|r| format!("~/{}", r.display()))
+                        .unwrap_or(p.display().to_string());
+                    out.push_str(&format!("              {shown}\n"));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Is this browser open right now? Checked again right before cleaning.
 pub fn is_running(bundle_id: &str) -> bool {
     crate::junk::running_apps().contains(&bundle_id.to_lowercase())
