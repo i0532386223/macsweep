@@ -684,7 +684,7 @@ mod font_tests {
                 has_glyph(d.font.as_ref().as_ref(), d.index, c)
             })
         };
-        for c in "Aaé°·—…›→✓⚠€£¥日本語中文한국어Ελληνικάрусский".chars() {
+        for c in "Aaé°·—…›→✓⚠⌘€£¥日本語中文한국어Ελληνικάрусский".chars() {
             assert!(covered(c), "no font draws {c:?}");
         }
     }
