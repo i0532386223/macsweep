@@ -48,3 +48,24 @@ On this Mac the battery reported 3,911 mAh nominal and 3,781 mAh raw full-charge
 capacity against a 4,382 mAh design capacity: 89% and 86%. Apple showed **90%**.
 Apple uses its own calculation, so MacSweep shows Apple's figure and lists the
 raw mAh readings separately. A unit test keeps it that way.
+
+## Memory, checked against Activity Monitor (side by side)
+
+Activity Monitor has no command-line equivalent, so these were checked with
+MacSweep and Activity Monitor → Memory open at the same moment on the same Mac.
+
+| Item | MacSweep | Activity Monitor | Match |
+|---|---|---|---|
+| Memory in use | 6.4 GB (before two decimals) | Memory Used 6.45 GB | ✅ |
+| Swap in use | 0.1 GB | Swap Used 123.9 MB | ✅ |
+| Memory pressure | High | yellow graph | ✅ |
+| Memory pressure | Normal (`kern.memorystatus_vm_pressure_level` = 1) | green graph | ✅ |
+
+Two earlier versions did **not** match and were fixed before release:
+
+- Adding up App Memory + Wired + Compressed gave 6.33 GB where Activity Monitor
+  showed 6.89 GB, and 6.0 GB where it showed 6.63 GB. Activity Monitor's Memory
+  Used is all physical memory minus free memory and cached files; some memory
+  in use isn't listed under any of those three categories.
+- The pressure label was read only when the screen opened, so it could be out
+  of date. Memory, pressure, swap and thermal state now update every 2 seconds.
