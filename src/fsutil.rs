@@ -14,7 +14,7 @@ pub fn changes() -> u64 {
     CHANGES.load(Ordering::Relaxed)
 }
 
-fn bump() {
+pub fn bump() {
     CHANGES.fetch_add(1, Ordering::Relaxed);
 }
 

@@ -42,6 +42,8 @@ pub mod icon {
     pub const BATTERY: &str = "\u{E0C0}";
     pub const BATTERY_CHARGING: &str = "\u{E0BA}";
     pub const HEART: &str = "\u{E2A8}";
+    pub const GLOBE: &str = "\u{E288}";
+    pub const GAME_CONTROLLER: &str = "\u{E26E}";
 }
 
 /// Background gradient + accent for one section.
@@ -87,6 +89,11 @@ pub const HEALTH: Palette = Palette {
     top: Color32::from_rgb(0x2a, 0x0e, 0x1c),
     bottom: Color32::from_rgb(0x8c, 0x2a, 0x48),
     accent: Color32::from_rgb(0xff, 0x6b, 0x8b),
+};
+pub const BROWSERS: Palette = Palette {
+    top: Color32::from_rgb(0x0e, 0x22, 0x2e),
+    bottom: Color32::from_rgb(0x1f, 0x5e, 0x8a),
+    accent: Color32::from_rgb(0x4f, 0xc3, 0xf7),
 };
 pub const GOOD: Color32 = Color32::from_rgb(0x34, 0xd3, 0x99);
 

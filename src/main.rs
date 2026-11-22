@@ -1,4 +1,6 @@
 mod agents;
+mod browsers;
+mod browsers_ui;
 mod dupes;
 mod fsutil;
 mod health;
@@ -6,6 +8,7 @@ mod health_ui;
 mod job;
 mod junk;
 mod large;
+mod leveldb;
 mod monitor;
 #[path = "../monitor/src/shared.rs"]
 mod shared;
@@ -23,17 +26,19 @@ enum Pane {
     Large,
     Dupes,
     Apps,
+    Browsers,
     Agents,
     Health,
 }
 
 impl Pane {
-    const ALL: [Pane; 7] = [
+    const ALL: [Pane; 8] = [
         Pane::Smart,
         Pane::Junk,
         Pane::Large,
         Pane::Dupes,
         Pane::Apps,
+        Pane::Browsers,
         Pane::Agents,
         Pane::Health,
     ];
@@ -44,6 +49,7 @@ impl Pane {
             Pane::Large => "Large & Old Files",
             Pane::Dupes => "Duplicates",
             Pane::Apps => "Uninstaller",
+            Pane::Browsers => "Browser Cleanup",
             Pane::Agents => "Launch Agents",
             Pane::Health => "Mac Health",
         }
@@ -55,6 +61,7 @@ impl Pane {
             Pane::Large => icon::FOLDER,
             Pane::Dupes => icon::COPY,
             Pane::Apps => icon::PACKAGE,
+            Pane::Browsers => icon::GLOBE,
             Pane::Agents => icon::ROCKET_LAUNCH,
             Pane::Health => icon::HEART,
         }
@@ -66,6 +73,7 @@ impl Pane {
             Pane::Large => theme::LARGE,
             Pane::Dupes => theme::DUPES,
             Pane::Apps => theme::APPS,
+            Pane::Browsers => theme::BROWSERS,
             Pane::Agents => theme::AGENTS,
             Pane::Health => theme::HEALTH,
         }
@@ -183,6 +191,7 @@ struct App {
     large: large::Large,
     dupes: dupes::Dupes,
     apps: uninstall::Uninstaller,
+    browsers: browsers_ui::BrowsersPane,
     agents: agents::Agents,
     health: health_ui::HealthPane,
     sys: Sys,
@@ -202,6 +211,7 @@ impl App {
             large: Default::default(),
             dupes: Default::default(),
             apps: Default::default(),
+            browsers: Default::default(),
             agents: Default::default(),
             health: Default::default(),
             sys: Sys::new(),
@@ -583,6 +593,7 @@ impl eframe::App for App {
                 Pane::Large => self.large.ui(ui, p),
                 Pane::Dupes => self.dupes.ui(ui, p),
                 Pane::Apps => self.apps.ui(ui, p),
+                Pane::Browsers => self.browsers.ui(ui, p),
                 Pane::Agents => self.agents.ui(ui, p),
                 Pane::Health => self.health.ui(ui, p),
             });
