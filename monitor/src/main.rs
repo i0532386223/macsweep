@@ -48,7 +48,7 @@ mod mac {
     use std::ptr::NonNull;
     use std::rc::Rc;
 
-    use crate::shared::{CONF, LABEL, RELOAD};
+    use crate::shared::{CONF, LABEL, RELOAD, fmt_mem};
 
     unsafe extern "C" {
         static _dispatch_main_q: c_void;
@@ -164,7 +164,8 @@ mod mac {
                 set(&self.cpu_line, format!("CPU: {:.0}%", self.cpu.get()));
                 set(
                     &self.ram_line,
-                    format!("Memory: {} of {} used", stats::fmt_bytes(used), stats::fmt_bytes(total)),
+                    // Same units as Activity Monitor and Mac Health (8.00 GB, not "9 GB").
+                    format!("Memory: {} of {} used", fmt_mem(used), fmt_mem(total)),
                 );
                 set(&self.pressure_line, format!("Memory pressure: {}", p.label()));
                 set(
