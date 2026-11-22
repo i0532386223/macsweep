@@ -5,7 +5,7 @@
 # MacSweep
 
 **A free, open-source Mac cleaner written in Rust.**
-Clean junk, find big forgotten files, fully uninstall apps and remove orphaned background items, all from a ~7 MB native app.
+Clean junk, find big forgotten files and duplicates, fully uninstall apps, clean each browser site by site, and check your battery and SSD health, all from one small native app.
 
 [![Latest release](https://img.shields.io/github/v/release/nihal4/macsweep?label=download&color=c04fd0)](https://github.com/nihal4/macsweep/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -25,7 +25,7 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 
 - **Free and open source.** No subscription, no ads, no "upgrade to clean" paywall. Every line is right here.
 - **Safe by design.** It never touches your passwords, cookies, browser history, email or app data, and only removes a website's data if you tick that site (see [Safety](#safety--your-data-is-never-touched)).
-- **Tiny and fast.** One native Rust binary of about 7 MB. Scans use every CPU core, and nothing runs in the background unless you turn on the menu bar monitor.
+- **Tiny and fast.** A native Rust app, under 7 MB on Apple Silicon. It uses macOS's own fonts instead of bundling them. Scans use every CPU core, and nothing runs in the background unless you turn on the menu bar monitor.
 - **Private.** No accounts, no telemetry. Everything happens on your Mac. The only network request is one check at launch asking GitHub whether a newer version exists; nothing about you or your Mac is sent. To turn it off, create an empty file at `~/Library/Application Support/MacSweep/no-update-check`.
 
 ## Features
@@ -41,6 +41,7 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 | 🚀 **Launch Agents** | Lists background helpers and flags **orphaned** ones whose app is already gone. |
 | ❤️ **Mac Health** | Battery health (Apple's own Maximum Capacity and Condition, cycle count), SSD health (lifespan used, spare blocks, data written, errors) and system details. Every value comes from macOS itself and is [validated against Apple's tools](docs/health-validation.md). |
 | 📊 **Menu bar monitor** | Optional and off by default: live CPU, memory and free disk space in the menu bar, from a separate tiny helper. [Measured cost](CHANGELOG.md#v030): 2.2% of one core at live updates, 0.5% at every 5 s. |
+| 🔔 **Update notice** | When a new version is published, the sidebar tells you and links to it. One request to GitHub at launch; nothing about you is sent. |
 | 💾 **Live disk & Trash** | The sidebar always shows free space and Trash size, updates instantly after every clean, and has a one-click **Empty Trash**. |
 
 <table>
@@ -91,6 +92,14 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 3. Open the app from Applications, not by running the binary in Terminal. From Terminal, the permission belongs to Terminal instead.
 </details>
 
+## Updating
+
+When a new version is out, MacSweep shows it in the sidebar (from v0.3.0 on; older versions can't). To update:
+
+1. Download the new zip from [Releases](https://github.com/nihal4/macsweep/releases/latest), unzip it, quit MacSweep, and replace the copy in **Applications**.
+2. **Turn Full Disk Access on again.** Releases aren't signed with an Apple developer certificate yet, so macOS treats each new version as a new app: in System Settings → Privacy & Security → Full Disk Access, remove MacSweep with **–**, add it again with **+**, and reopen it.
+3. If you use the menu bar monitor, it switches to the new version by itself.
+
 ## Safety — your data is never touched
 
 Some cleaners have wiped people's browser profiles and email. MacSweep is built so that **can't happen**:
@@ -136,9 +145,11 @@ Pull requests are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md). The o
 - [Rust](https://www.rust-lang.org) with [egui](https://github.com/emilk/egui) (OpenGL), with no web view inside
 - [`jwalk`](https://crates.io/crates/jwalk) + [`rayon`](https://crates.io/crates/rayon) for parallel scanning
 - [`trash`](https://crates.io/crates/trash) for Finder-compatible Trash, [`icns`](https://crates.io/crates/icns) for app icons, [`plist`](https://crates.io/crates/plist) for app metadata
-- San Francisco (the system font) is memory-mapped instead of bundled
+- No bundled text fonts: San Francisco and the Mac's own fallback fonts are memory-mapped from disk; the icon font holds only the icons used
+- The menu bar monitor is a separate tiny native app (AppKit through [`objc2`](https://crates.io/crates/objc2)), so MacSweep itself doesn't stay open
+- Browser Cleanup reads Chrome's own indexes with a small read-only LevelDB reader, and website icons from the browser's icon database with the system SQLite
 
-Releases are built by GitHub Actions: push a tag such as `v0.2.0` and a universal `.app` is attached to a new release, with notes taken from [CHANGELOG.md](CHANGELOG.md).
+Releases are built by GitHub Actions: push a tag such as `v0.3.0` and a universal `.app` is attached to a new release, with notes taken from [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

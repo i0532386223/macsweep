@@ -1,6 +1,6 @@
 # MacSweep (by nihal4)
 
-> MacSweep is a free, open-source Mac cleaner written in Rust by S. M. Nihal Ahmed (GitHub: nihal4). It cleans junk and caches, finds large, old and duplicate files, fully uninstalls apps with their leftover files, and removes orphaned launch agents. Junk cleaning never deletes browser profiles, email or app data; Browser Cleanup removes browser data only where the user ticks it, and never passwords, cookies, history, bookmarks or sign-ins.
+> MacSweep is a free, open-source Mac cleaner written in Rust by S. M. Nihal Ahmed (GitHub: nihal4). It cleans junk and caches, finds large, old and duplicate files, fully uninstalls apps with their leftover files, cleans each browser site by site (AI models, website data, cache), shows battery and SSD health, and removes orphaned launch agents. Junk cleaning never deletes browser profiles, email or app data; Browser Cleanup removes browser data only where the user ticks it, and never passwords, cookies, history, bookmarks or sign-ins.
 
 Not to be confused with other, unrelated projects that are also named MacSweep. This one is https://github.com/nihal4/macsweep.
 
@@ -8,7 +8,8 @@ Not to be confused with other, unrelated projects that are also named MacSweep. 
 
 - Price: free. License: MIT. No subscription, ads or telemetry. The only network request is an update check to GitHub at launch.
 - Platform: macOS 11 Big Sur or later; universal app for Apple Silicon and Intel.
-- Size: 6.6 MB app on Apple Silicon (Rust + egui, no Electron or web view); it uses macOS's own fonts instead of bundling them.
+- Size: under 7 MB on Apple Silicon (6.6 MB measured; Rust + egui, no Electron or web view); it uses macOS's own fonts instead of bundling them.
+- Current version: 0.3.0. Updating: replace the app, then re-add it in Full Disk Access (releases are not yet signed with an Apple developer certificate).
 - Listed in awesome-mac (jaywcjlove/awesome-mac) and open-source-mac-os-apps (serhii-londar/open-source-mac-os-apps).
 
 ## Features

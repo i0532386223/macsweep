@@ -52,10 +52,16 @@ See what each browser keeps on your Mac, sorted into three groups, and choose ex
 - To turn it off, create an empty file at `~/Library/Application Support/MacSweep/no-update-check`.
 - Versions before 0.3.0 can't show this notice. If you know someone on 0.1 or 0.2, point them to the Releases page once.
 
+### Updating from 0.1 or 0.2
+Replace MacSweep in Applications with this version, then **turn Full Disk Access on again**: in System Settings → Privacy & Security → Full Disk Access, remove MacSweep with –, add it again with +, and reopen it. Releases aren't signed with an Apple developer certificate yet, so macOS treats each version as a new app.
+
 ### Security
 - Every system command is called by its full path (`/bin/launchctl`, `/usr/bin/osascript` …), so a changed `PATH` can't substitute another program.
 - The "Relaunch" button after granting Full Disk Access quoted the app's path unsafely for the shell; a folder name containing `$` or a backtick could run a command. Fixed.
 - The release pipeline pins every third-party GitHub Action to an exact commit, and CI runs with read-only permissions.
+
+### Smaller
+- The app is about 1.1 MB smaller (7.6 MB → 6.6 MB on Apple Silicon) with nothing lost: the icon font holds only the 37 icons used, and egui's bundled text fonts are replaced by the Mac's own (San Francisco, Helvetica, Apple Symbols, Arial Unicode, Menlo), which also draw Chinese, Japanese, Korean, Greek and Cyrillic file names the old fonts couldn't.
 
 ### Development
 - `main` is protected: every change goes through a pull request, and CI (formatting, tests, app build) must pass.
