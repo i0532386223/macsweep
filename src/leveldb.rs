@@ -14,6 +14,9 @@ use std::path::Path;
 
 const BLOCK: usize = 32 * 1024;
 const TABLE_MAGIC: u64 = 0xdb47_7524_8b80_fb57;
+/// LevelDB blocks are about 4 KB; Chrome's indexes are tiny. A block that
+/// claims to unpack to more than this comes from a damaged file.
+const MAX_BLOCK: usize = 16 * 1024 * 1024;
 
 /// key -> (sequence number, value, or None if deleted)
 type Entries = HashMap<Vec<u8>, (u64, Option<Vec<u8>>)>;
@@ -117,7 +120,11 @@ fn block(file: &[u8], handle: (u64, u64)) -> Option<Vec<u8>> {
     let raw = file.get(off..off.checked_add(size)?)?;
     match *file.get(off + size)? {
         0 => Some(raw.to_vec()),
-        1 => snap::raw::Decoder::new().decompress_vec(raw).ok(),
+        1 => {
+            // Check the size the block claims before unpacking it.
+            let len = snap::raw::decompress_len(raw).ok()?;
+            (len <= MAX_BLOCK).then(|| snap::raw::Decoder::new().decompress_vec(raw).ok())?
+        }
         _ => None, // a compression MacSweep doesn't know: skip rather than guess
     }
 }
@@ -375,6 +382,16 @@ pub mod tests {
         assert_eq!(get(&m, "ORIGIN:https_c.com_0"), None);
         assert_eq!(get(&m, "ORIGIN:https_d.com_0").as_deref(), Some("006"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_block_claiming_a_huge_size_is_skipped() {
+        // Snappy data whose header claims about 4 GB once unpacked.
+        let mut file = vec![0xff, 0xff, 0xff, 0xff, 0x0f, 0, 0, 0];
+        let size = file.len() as u64;
+        file.push(1); // compressed with Snappy
+        file.extend_from_slice(&[0; 4]);
+        assert!(block(&file, (0, size)).is_none());
     }
 
     #[test]
