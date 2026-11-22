@@ -291,8 +291,10 @@ mod mac {
         impl Actions {
             #[unsafe(method(openMacSweep:))]
             fn open_macsweep(&self, _sender: Option<&AnyObject>) {
+                // Through macOS directly: no `open` process left behind.
                 if let Some(app) = main_app() {
-                    let _ = std::process::Command::new("open").arg(app).spawn();
+                    let url = NSURL::fileURLWithPath(&NSString::from_str(&app.to_string_lossy()));
+                    NSWorkspace::sharedWorkspace().openURL(&url);
                 }
             }
 
