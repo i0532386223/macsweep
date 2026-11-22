@@ -1,0 +1,567 @@
+//! MacSweep Monitor: a menu-bar item showing CPU, memory and disk.
+//!
+//! Built to cost almost nothing while it runs:
+//! - native AppKit only (macOS draws the text; no graphics engine),
+//! - numbers read straight from the kernel (no subprocesses),
+//! - one timer every few seconds, with tolerance so macOS can batch the
+//!   wake-up with its own, and no updates while the screen is off,
+//! - disk space, which changes slowly, is read once a minute.
+//!
+//! It is started by MacSweep (as a login item) only if the user turns it on.
+
+// On other systems only the shared logic is built (for tests).
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
+#[allow(dead_code)] // render() is only used by MacSweep itself
+mod shared;
+mod stats;
+
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("MacSweep Monitor runs on macOS only.");
+}
+
+#[cfg(target_os = "macos")]
+fn main() {
+    mac::run();
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use crate::stats::{self, Config, Sampler};
+    use block2::RcBlock;
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyObject, NSObject, ProtocolObject};
+    use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+    use objc2_app_kit::{
+        NSApplication, NSApplicationActivationPolicy, NSBox, NSBoxType, NSColor, NSFont, NSFontWeightMedium, NSFontWeightRegular,
+        NSFontWeightSemibold, NSImage, NSImageSymbolConfiguration, NSImageView, NSLineBreakMode, NSMenu, NSMenuDelegate,
+        NSMenuItem, NSStatusBar, NSStatusItem, NSTextAlignment, NSTextField, NSTitlePosition, NSVariableStatusItemLength, NSView,
+        NSWorkspace, NSWorkspaceScreensDidSleepNotification, NSWorkspaceScreensDidWakeNotification,
+        NSWorkspaceSessionDidBecomeActiveNotification, NSWorkspaceSessionDidResignActiveNotification,
+    };
+    use objc2_foundation::{
+        NSArray, NSNotification, NSNumber, NSObjectProtocol, NSPoint, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString,
+        NSTimer, NSURL, NSURLVolumeAvailableCapacityForImportantUsageKey, ns_string,
+    };
+    use std::cell::{Cell, RefCell};
+    use std::ffi::{CString, c_char, c_void};
+    use std::path::PathBuf;
+    use std::ptr::NonNull;
+    use std::rc::Rc;
+
+    use crate::shared::{CONF, LABEL, RELOAD};
+
+    unsafe extern "C" {
+        static _dispatch_main_q: c_void;
+        fn notify_register_dispatch(
+            name: *const c_char,
+            out_token: *mut i32,
+            queue: *const c_void,
+            handler: &block2::Block<dyn Fn(i32)>,
+        ) -> u32;
+    }
+
+    fn home() -> PathBuf {
+        std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    }
+
+    fn config() -> Config {
+        let p = home().join(CONF);
+        Config::parse(&std::fs::read_to_string(p).unwrap_or_default())
+    }
+
+    /// MacSweep.app, found from where this helper lives inside it:
+    /// MacSweep.app/Contents/Library/LoginItems/MacSweep Monitor.app/Contents/MacOS/…
+    fn main_app() -> Option<PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        exe.ancestors()
+            .filter(|p| p.extension().is_some_and(|e| e == "app"))
+            .nth(1)
+            .map(PathBuf::from)
+    }
+
+    /// Free space the way Finder counts it (includes purgeable space).
+    fn disk_free() -> Option<u64> {
+        let url = NSURL::fileURLWithPath(ns_string!("/"));
+        let key = unsafe { NSURLVolumeAvailableCapacityForImportantUsageKey };
+        let keys = NSArray::from_slice(&[key]);
+        let found = url
+            .resourceValuesForKeys_error(&keys)
+            .ok()
+            .and_then(|d| d.objectForKey(key))
+            .and_then(|v| v.downcast::<NSNumber>().ok())
+            .map(|n| n.longLongValue())
+            .filter(|&n| n > 0)
+            .map(|n| n as u64);
+        found.or_else(stats::disk_free_plain)
+    }
+
+    /// Everything the monitor keeps between updates. Lives on the main thread.
+    struct Monitor {
+        mtm: MainThreadMarker,
+        item: Retained<NSStatusItem>,
+        cpu_row: Row,
+        ram_row: Row,
+        disk_row: Row,
+        footer: Retained<NSTextField>,
+        sampler: RefCell<Sampler>,
+        config: Cell<Config>,
+        disk: Cell<Option<u64>>,
+        disk_size: Cell<Option<u64>>,
+        disk_at: Cell<f64>,
+        cpu: Cell<f64>,
+        title: RefCell<String>,
+        timer: RefCell<Option<Retained<NSTimer>>>,
+        asleep: Cell<bool>,
+        menu_open: Cell<bool>,
+    }
+
+    thread_local! {
+        static MONITOR: RefCell<Option<Rc<Monitor>>> = const { RefCell::new(None) };
+    }
+
+    fn with_monitor(f: impl FnOnce(&Rc<Monitor>)) {
+        if let Some(m) = MONITOR.with(|m| m.borrow().clone()) {
+            f(&m);
+        }
+    }
+
+    fn now() -> f64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0)
+    }
+
+    impl Monitor {
+        /// Takes a new sample and redraws. Called once per interval.
+        fn tick(&self) {
+            if self.asleep.get() {
+                return;
+            }
+            self.cpu.set(self.sampler.borrow_mut().cpu());
+            // Disk space changes slowly: every 30 s is plenty.
+            if now() - self.disk_at.get() > 30.0 {
+                self.disk_at.set(now());
+                self.disk.set(disk_free());
+            }
+            self.redraw();
+        }
+
+        /// Updates the menu-bar text, and the menu only while it's open.
+        fn redraw(&self) {
+            let s = self.sampler.borrow();
+            let (used, total, p) = (s.ram_used(), s.ram_total, stats::pressure());
+            let title = stats::title(&self.config.get(), self.cpu.get(), used, total, self.disk.get(), p);
+            // Redrawing costs more than sampling: skip it when nothing changed.
+            if *self.title.borrow() != title {
+                if let Some(button) = self.item.button(self.mtm) {
+                    button.setTitle(&NSString::from_str(&title));
+                }
+                *self.title.borrow_mut() = title;
+            }
+            if self.menu_open.get() {
+                self.cpu_row
+                    .show(&format!("{:.0}%", self.cpu.get()), self.cpu.get() / 100.0, None);
+
+                // Same units as Activity Monitor and Mac Health (8.00 GB, not "9 GB").
+                let gb = |b: u64| b as f64 / 1_073_741_824.0;
+                let tint = match p {
+                    stats::Pressure::Normal => None,
+                    stats::Pressure::Warning => Some(NSColor::systemOrangeColor()),
+                    stats::Pressure::Critical => Some(NSColor::systemRedColor()),
+                };
+                self.ram_row.show(
+                    &format!("{:.2} of {:.2} GB", gb(used), gb(total)),
+                    if total > 0 { used as f64 / total as f64 } else { 0.0 },
+                    tint.as_deref(),
+                );
+                if let Some(c) = &self.ram_row.caption {
+                    c.setStringValue(&NSString::from_str(&format!("Memory pressure: {}", p.label())));
+                    let color = tint.clone().unwrap_or_else(NSColor::secondaryLabelColor);
+                    c.setTextColor(Some(&color));
+                }
+
+                match (self.disk.get(), self.disk_size.get()) {
+                    (Some(free), Some(size)) if size > 0 => {
+                        let used = 1.0 - free as f64 / size as f64;
+                        // Orange once less than a tenth of the disk is free.
+                        let low = (used > 0.9).then(NSColor::systemOrangeColor);
+                        self.disk_row
+                            .show(&format!("{} free", stats::fmt_bytes(free)), used, low.as_deref());
+                    }
+                    (Some(free), _) => self.disk_row.show(&format!("{} free", stats::fmt_bytes(free)), 0.0, None),
+                    _ => self.disk_row.show("Unknown", 0.0, None),
+                }
+
+                self.footer.setStringValue(&NSString::from_str(&format!(
+                    "This monitor uses {:.1} MB · {}",
+                    stats::own_memory() as f64 / 1e6,
+                    match self.config.get().interval {
+                        1 => "updates live".to_string(),
+                        n => format!("updates every {n} s"),
+                    }
+                )));
+            }
+        }
+
+        /// (Re)starts the update timer at the configured interval.
+        fn schedule(self: &Rc<Self>) {
+            if let Some(old) = self.timer.borrow_mut().take() {
+                old.invalidate();
+            }
+            let interval = f64::from(self.config.get().interval);
+            let me = Rc::downgrade(self);
+            let tick = RcBlock::new(move |_: NonNull<NSTimer>| {
+                if let Some(m) = me.upgrade() {
+                    m.tick();
+                }
+            });
+            let timer = unsafe { NSTimer::timerWithTimeInterval_repeats_block(interval, true, &tick) };
+            // A little slack lets macOS batch our wake-up with its own.
+            timer.setTolerance(interval * 0.1);
+            // "Common modes" keeps it running while the menu is open, too.
+            unsafe { NSRunLoop::mainRunLoop().addTimer_forMode(&timer, NSRunLoopCommonModes) };
+            *self.timer.borrow_mut() = Some(timer);
+        }
+
+        /// Gives the item a fixed width, wide enough for the largest numbers.
+        ///
+        /// Profiling showed most of the monitor's CPU time is macOS redrawing
+        /// the menu-bar item after each change. With a variable width, every
+        /// change also resized the item and re-ran the menu bar's layout;
+        /// with a fixed width only the text is redrawn.
+        fn fix_width(&self) {
+            let Some(button) = self.item.button(self.mtm) else { return };
+            let widest = stats::title(
+                &self.config.get(),
+                100.0,
+                100,
+                100,
+                Some(999_000_000_000),
+                stats::Pressure::Warning,
+            );
+            button.setTitle(&NSString::from_str(&widest));
+            let w = button.fittingSize().width;
+            self.item.setLength(w.ceil() + 4.0);
+            self.title.borrow_mut().clear(); // force the real text on the next redraw
+        }
+
+        /// Nobody can see the menu bar (screen off, or another user's
+        /// session in front): stop the timer completely, so the Mac isn't
+        /// woken every second for nothing.
+        fn pause(&self) {
+            self.asleep.set(true);
+            if let Some(t) = self.timer.borrow_mut().take() {
+                t.invalidate();
+            }
+        }
+
+        fn resume(self: &Rc<Self>) {
+            if !self.asleep.replace(false) {
+                return;
+            }
+            self.disk_at.set(0.0); // refresh disk space at once
+            self.schedule();
+            self.tick();
+        }
+
+        /// New settings from MacSweep: apply at once, no restart.
+        fn reload(self: &Rc<Self>) {
+            let old = self.config.get();
+            let new = config();
+            self.config.set(new);
+            if new.interval != old.interval && !self.asleep.get() {
+                self.schedule();
+            }
+            self.fix_width();
+            self.redraw();
+        }
+    }
+
+    define_class!(
+        // Receives the menu's clicks and open/close events.
+        #[unsafe(super(NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "MacSweepMonitorActions"]
+        struct Actions;
+
+        unsafe impl NSObjectProtocol for Actions {}
+
+        unsafe impl NSMenuDelegate for Actions {
+            #[unsafe(method(menuWillOpen:))]
+            fn menu_will_open(&self, _menu: &NSMenu) {
+                with_monitor(|m| {
+                    m.menu_open.set(true);
+                    m.redraw();
+                });
+            }
+
+            #[unsafe(method(menuDidClose:))]
+            fn menu_did_close(&self, _menu: &NSMenu) {
+                with_monitor(|m| m.menu_open.set(false));
+            }
+        }
+
+        impl Actions {
+            #[unsafe(method(openMacSweep:))]
+            fn open_macsweep(&self, _sender: Option<&AnyObject>) {
+                // Through macOS directly: no `open` process left behind.
+                if let Some(app) = main_app() {
+                    let url = NSURL::fileURLWithPath(&NSString::from_str(&app.to_string_lossy()));
+                    NSWorkspace::sharedWorkspace().openURL(&url);
+                }
+            }
+
+            /// Removes the login item and quits. MacSweep can turn it back on.
+            #[unsafe(method(turnOff:))]
+            fn turn_off(&self, _sender: Option<&AnyObject>) {
+                let plist = home().join(format!("Library/LaunchAgents/{LABEL}.plist"));
+                let _ = std::fs::remove_file(&plist);
+                // Tell launchd to forget us, without waiting for the answer.
+                let _ = std::process::Command::new("/bin/launchctl")
+                    .args(["remove", LABEL])
+                    .spawn();
+                std::process::exit(0);
+            }
+        }
+    );
+
+    impl Actions {
+        fn new(mtm: MainThreadMarker) -> Retained<Self> {
+            unsafe { msg_send![Self::alloc(mtm), init] }
+        }
+    }
+
+    // ----- The menu's information rows -----
+    //
+    // Plain views inside menu items, laid out like Control Center: an icon,
+    // the name on the left, the value on the right, a thin bar underneath.
+    // Views never highlight on hover, so they don't look like buttons.
+    // Coordinates start at the bottom left, as AppKit's do.
+
+    const WIDTH: f64 = 280.0;
+    const SIDE: f64 = 14.0; // left and right margin
+    const TEXT_X: f64 = 40.0; // where names and bars start, after the icon
+    const BAR_W: f64 = WIDTH - TEXT_X - SIDE;
+
+    fn rect(x: f64, y: f64, w: f64, h: f64) -> NSRect {
+        NSRect::new(NSPoint::new(x, y), NSSize::new(w, h))
+    }
+
+    fn label(mtm: MainThreadMarker, text: &str, font: &NSFont, color: &NSColor, frame: NSRect) -> Retained<NSTextField> {
+        let l = NSTextField::labelWithString(&NSString::from_str(text), mtm);
+        l.setFont(Some(font));
+        l.setTextColor(Some(color));
+        l.setLineBreakMode(NSLineBreakMode::ByTruncatingTail);
+        l.setFrame(frame);
+        l
+    }
+
+    /// A filled, rounded rectangle (used for the bars).
+    fn pill(mtm: MainThreadMarker, color: &NSColor, frame: NSRect) -> Retained<NSBox> {
+        let b = NSBox::initWithFrame(NSBox::alloc(mtm), frame);
+        b.setBoxType(NSBoxType::Custom);
+        b.setTitlePosition(NSTitlePosition::NoTitle);
+        b.setBorderWidth(0.0);
+        b.setCornerRadius(frame.size.height / 2.0);
+        b.setFillColor(color);
+        b.setContentViewMargins(NSSize::new(0.0, 0.0));
+        b
+    }
+
+    /// A menu item that shows a view instead of a title.
+    fn view_item(mtm: MainThreadMarker, menu: &NSMenu, height: f64) -> Retained<NSView> {
+        let view = NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, WIDTH, height));
+        let item = NSMenuItem::new(mtm);
+        item.setView(Some(&view));
+        menu.addItem(&item);
+        view
+    }
+
+    /// One measure: icon, name, value, bar, and an optional caption below.
+    struct Row {
+        value: Retained<NSTextField>,
+        fill: Retained<NSBox>,
+        caption: Option<Retained<NSTextField>>,
+    }
+
+    impl Row {
+        fn new(mtm: MainThreadMarker, menu: &NSMenu, symbol: &str, name: &str, with_caption: bool) -> Self {
+            let extra = if with_caption { 18.0 } else { 0.0 };
+            let view = view_item(mtm, menu, 46.0 + extra);
+            let text_y = 22.0 + extra;
+
+            // System icons (SF Symbols); skipped if this macOS lacks one.
+            if let Some(img) = NSImage::imageWithSystemSymbolName_accessibilityDescription(&NSString::from_str(symbol), None) {
+                let icon = NSImageView::imageViewWithImage(&img, mtm);
+                let config = NSImageSymbolConfiguration::configurationWithPointSize_weight(14.0, unsafe { NSFontWeightRegular });
+                icon.setSymbolConfiguration(Some(&config));
+                icon.setContentTintColor(Some(&NSColor::secondaryLabelColor()));
+                icon.setFrame(rect(SIDE - 1.0, text_y - 1.0, 20.0, 20.0));
+                view.addSubview(&icon);
+            }
+
+            let name_font = NSFont::systemFontOfSize_weight(13.0, unsafe { NSFontWeightMedium });
+            view.addSubview(&label(
+                mtm,
+                name,
+                &name_font,
+                &NSColor::labelColor(),
+                rect(TEXT_X, text_y, 90.0, 17.0),
+            ));
+
+            // Digits of equal width, so values don't jiggle as they change.
+            let value_font = NSFont::monospacedDigitSystemFontOfSize_weight(13.0, unsafe { NSFontWeightRegular });
+            let value = label(
+                mtm,
+                "…",
+                &value_font,
+                &NSColor::secondaryLabelColor(),
+                rect(WIDTH - SIDE - 150.0, text_y, 150.0, 17.0),
+            );
+            value.setAlignment(NSTextAlignment::Right);
+            view.addSubview(&value);
+
+            let bar_y = 12.0 + extra;
+            view.addSubview(&pill(mtm, &NSColor::quaternaryLabelColor(), rect(TEXT_X, bar_y, BAR_W, 4.0)));
+            let fill = pill(mtm, &NSColor::controlAccentColor(), rect(TEXT_X, bar_y, 0.0, 4.0));
+            view.addSubview(&fill);
+
+            let caption = with_caption.then(|| {
+                let font = NSFont::systemFontOfSize_weight(11.0, unsafe { NSFontWeightRegular });
+                let c = label(
+                    mtm,
+                    "",
+                    &font,
+                    &NSColor::secondaryLabelColor(),
+                    rect(TEXT_X, 8.0, BAR_W, 14.0),
+                );
+                view.addSubview(&c);
+                c
+            });
+            Row { value, fill, caption }
+        }
+
+        /// New value; `share` is how full the bar is (0–1). The bar uses the
+        /// Mac's accent colour unless `tint` gives a warning colour.
+        fn show(&self, value: &str, share: f64, tint: Option<&NSColor>) {
+            self.value.setStringValue(&NSString::from_str(value));
+            let mut f = self.fill.frame();
+            f.size.width = (share.clamp(0.0, 1.0) * BAR_W).round();
+            self.fill.setFrame(f);
+            let accent = NSColor::controlAccentColor();
+            self.fill.setFillColor(tint.unwrap_or(&accent));
+        }
+    }
+
+    fn action_item(mtm: MainThreadMarker, menu: &NSMenu, title: &str, action: objc2::runtime::Sel, target: &Actions) {
+        let item = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(title),
+                Some(action),
+                ns_string!(""),
+            )
+        };
+        unsafe { item.setTarget(Some(target)) };
+        menu.addItem(&item);
+    }
+
+    pub fn run() {
+        let mtm = MainThreadMarker::new().expect("must start on the main thread");
+        let app = NSApplication::sharedApplication(mtm);
+        // No Dock icon, no app menu: just the menu-bar item.
+        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+
+        // The real width is set by fix_width() once the font is in place.
+        let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
+        if let Some(button) = item.button(mtm) {
+            // Digits of equal width, so the item doesn't wobble as numbers change.
+            let font = NSFont::monospacedDigitSystemFontOfSize_weight(12.0, unsafe { NSFontWeightRegular });
+            button.setFont(Some(&font));
+        }
+
+        let actions = Actions::new(mtm);
+        let menu = NSMenu::new(mtm);
+        menu.setAutoenablesItems(false);
+        menu.setDelegate(Some(ProtocolObject::from_ref(&*actions)));
+        // Header, so it's clear which app this menu belongs to.
+        let header = view_item(mtm, &menu, 26.0);
+        let header_font = NSFont::systemFontOfSize_weight(12.0, unsafe { NSFontWeightSemibold });
+        header.addSubview(&label(
+            mtm,
+            "MacSweep Monitor",
+            &header_font,
+            &NSColor::secondaryLabelColor(),
+            rect(SIDE, 4.0, WIDTH - 2.0 * SIDE, 16.0),
+        ));
+        let cpu_row = Row::new(mtm, &menu, "cpu", "CPU", false);
+        let ram_row = Row::new(mtm, &menu, "memorychip", "Memory", true);
+        let disk_row = Row::new(mtm, &menu, "internaldrive", "Disk", false);
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        let footer_view = view_item(mtm, &menu, 22.0);
+        let footer_font = NSFont::systemFontOfSize_weight(11.0, unsafe { NSFontWeightRegular });
+        let footer = label(
+            mtm,
+            "",
+            &footer_font,
+            &NSColor::tertiaryLabelColor(),
+            rect(SIDE, 4.0, WIDTH - 2.0 * SIDE, 14.0),
+        );
+        footer_view.addSubview(&footer);
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
+        action_item(mtm, &menu, "Open MacSweep", sel!(openMacSweep:), &actions);
+        action_item(mtm, &menu, "Turn Off Menu Bar Monitor", sel!(turnOff:), &actions);
+        item.setMenu(Some(&menu));
+
+        let m = Rc::new(Monitor {
+            mtm,
+            item,
+            cpu_row,
+            ram_row,
+            disk_row,
+            footer,
+            sampler: RefCell::new(Sampler::new()),
+            config: Cell::new(config()),
+            disk: Cell::new(disk_free()),
+            disk_size: Cell::new(stats::disk_total()),
+            disk_at: Cell::new(now()),
+            cpu: Cell::new(0.0),
+            title: RefCell::new(String::new()),
+            timer: RefCell::new(None),
+            asleep: Cell::new(false),
+            menu_open: Cell::new(false),
+        });
+        MONITOR.with(|g| *g.borrow_mut() = Some(m.clone()));
+        m.fix_width();
+        m.redraw();
+        m.schedule();
+
+        // Settings changed in MacSweep: apply instantly. Costs nothing until it fires.
+        let reload = RcBlock::new(|_token: i32| with_monitor(|m| m.reload()));
+        let name = CString::new(RELOAD).unwrap();
+        let mut token = 0;
+        unsafe { notify_register_dispatch(name.as_ptr(), &mut token, &_dispatch_main_q, &reload) };
+
+        // Stop entirely while the displays sleep or another user's session is
+        // in front; catch up the moment the menu bar is visible again.
+        let center = NSWorkspace::sharedWorkspace().notificationCenter();
+        let pause = RcBlock::new(|_: NonNull<NSNotification>| with_monitor(|m| m.pause()));
+        let resume = RcBlock::new(|_: NonNull<NSNotification>| with_monitor(|m| m.resume()));
+        let _observers: Vec<_> = unsafe {
+            [
+                (NSWorkspaceScreensDidSleepNotification, &pause),
+                (NSWorkspaceSessionDidResignActiveNotification, &pause),
+                (NSWorkspaceScreensDidWakeNotification, &resume),
+                (NSWorkspaceSessionDidBecomeActiveNotification, &resume),
+            ]
+            .into_iter()
+            .map(|(name, block)| center.addObserverForName_object_queue_usingBlock(Some(name), None, None, block))
+            .collect()
+        };
+
+        app.run();
+    }
+}

@@ -37,6 +37,14 @@ pub mod icon {
     pub const COPY: &str = "\u{E1CA}";
     pub const EYE: &str = "\u{E220}";
     pub const FOLDER_OPEN: &str = "\u{E256}";
+    pub const GAUGE: &str = "\u{E628}";
+    pub const CPU: &str = "\u{E610}";
+    pub const BATTERY: &str = "\u{E0C0}";
+    pub const BATTERY_CHARGING: &str = "\u{E0BA}";
+    pub const HEART: &str = "\u{E2A8}";
+    pub const GLOBE: &str = "\u{E288}";
+    pub const ARROW_CIRCLE_UP: &str = "\u{E030}";
+    pub const GAME_CONTROLLER: &str = "\u{E26E}";
 }
 
 /// Background gradient + accent for one section.
@@ -76,6 +84,24 @@ pub const AGENTS: Palette = Palette {
     top: Color32::from_rgb(0x0b, 0x2a, 0x3c),
     bottom: Color32::from_rgb(0x1a, 0x84, 0x96),
     accent: Color32::from_rgb(0x42, 0xd2, 0xe0),
+};
+
+pub const HEALTH: Palette = Palette {
+    top: Color32::from_rgb(0x2a, 0x0e, 0x1c),
+    bottom: Color32::from_rgb(0x8c, 0x2a, 0x48),
+    accent: Color32::from_rgb(0xff, 0x6b, 0x8b),
+};
+pub const BROWSERS: Palette = Palette {
+    top: Color32::from_rgb(0x0e, 0x22, 0x2e),
+    bottom: Color32::from_rgb(0x1f, 0x5e, 0x8a),
+    accent: Color32::from_rgb(0x4f, 0xc3, 0xf7),
+};
+pub const GOOD: Color32 = Color32::from_rgb(0x34, 0xd3, 0x99);
+
+pub const MONITOR: Palette = Palette {
+    top: Color32::from_rgb(0x10, 0x1c, 0x2c),
+    bottom: Color32::from_rgb(0x3a, 0x5a, 0x7a),
+    accent: Color32::from_rgb(0x8c, 0xc8, 0xff),
 };
 
 pub const DANGER: Color32 = Color32::from_rgb(0xff, 0x5f, 0x6d);
@@ -142,13 +168,47 @@ fn load_system_font() -> Option<egui::epaint::text::Blob> {
     Some(blob)
 }
 
-pub fn setup(ctx: &egui::Context) {
+/// Fonts every Mac already has, used after San Francisco for characters
+/// it lacks (names of files, apps and websites can be in any script).
+/// They're mapped from disk, not bundled, so they cost no app size and,
+/// until a glyph is needed, no memory.
+const MAC_FALLBACKS: &[(&str, &str, u32)] = &[
+    ("helvetica", "/System/Library/Fonts/Helvetica.ttc", 0),
+    ("apple-symbols", "/System/Library/Fonts/Apple Symbols.ttf", 0),
+    ("arial-unicode", "/System/Library/Fonts/Supplemental/Arial Unicode.ttf", 0),
+];
+const MAC_MONO: (&str, &str, u32) = ("menlo", "/System/Library/Fonts/Menlo.ttc", 0);
+
+fn map_font(path: &str) -> Option<egui::epaint::text::Blob> {
+    let f = std::fs::File::open(path).ok()?;
+    let map = unsafe { memmap2::Mmap::map(&f) }.ok()?;
+    Some(Arc::new(map))
+}
+
+/// The font chains MacSweep draws with: San Francisco in three weights,
+/// then the Mac's fallbacks (or egui's own fonts where those exist, i.e.
+/// on Linux), then the Phosphor icons.
+pub fn font_definitions() -> egui::FontDefinitions {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "phosphor".into(),
         Arc::new(egui::FontData::from_static(include_bytes!("../assets/Phosphor-Fill.ttf"))),
     );
-    let defaults = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    let mut fallbacks = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+    let mut mono = fonts.families.get(&FontFamily::Monospace).cloned().unwrap_or_default();
+    for (key, path, index) in MAC_FALLBACKS.iter().chain([&MAC_MONO]) {
+        if let Some(blob) = map_font(path) {
+            fonts
+                .font_data
+                .insert((*key).into(), Arc::new(egui::FontData::from_blob(blob, *index)));
+            if *key == MAC_MONO.0 {
+                mono.insert(0, (*key).into());
+            } else {
+                fallbacks.push((*key).into());
+                mono.push((*key).into());
+            }
+        }
+    }
     let sf = load_system_font();
     for (name, weight) in [("regular", 400.0), ("semibold", 600.0), ("bold", 700.0)] {
         let mut chain = Vec::new();
@@ -161,18 +221,20 @@ pub fn setup(ctx: &egui::Context) {
                 .insert(key.clone(), Arc::new(egui::FontData::from_blob(blob.clone(), 0).tweak(tweak)));
             chain.push(key);
         }
-        chain.extend(defaults.iter().cloned());
+        chain.extend(fallbacks.iter().cloned());
         chain.push("phosphor".into());
         if name == "regular" {
             fonts.families.insert(FontFamily::Proportional, chain.clone());
         }
         fonts.families.insert(fam(name), chain);
     }
+    mono.push("phosphor".into());
+    fonts.families.insert(FontFamily::Monospace, mono);
     fonts
-        .families
-        .entry(FontFamily::Monospace)
-        .or_default()
-        .push("phosphor".into());
+}
+
+pub fn setup(ctx: &egui::Context) {
+    let fonts = font_definitions();
     ctx.set_fonts(fonts);
     ctx.set_theme(egui::ThemePreference::Dark);
 
@@ -565,4 +627,65 @@ pub fn bottom_frame() -> egui::Frame {
         top: 10,
         bottom: 0,
     })
+}
+
+#[cfg(test)]
+mod font_tests {
+    use skrifa::{FontRef, MetadataProvider};
+
+    fn has_glyph(data: &[u8], index: u32, c: char) -> bool {
+        FontRef::from_index(data, index).is_ok_and(|f| f.charmap().map(c).is_some())
+    }
+
+    /// Every icon in `icon::` must be in the cut-down icon font; if this
+    /// fails after adding one, run scripts/subset-icons.sh.
+    #[test]
+    fn every_icon_is_in_the_bundled_font() {
+        let font = include_bytes!("../assets/Phosphor-Fill.ttf");
+        let src = include_str!("theme.rs");
+        let mut n = 0;
+        for part in src.split("\\u{").skip(1) {
+            let hex = &part[..part.find('}').unwrap()];
+            let Ok(cp) = u32::from_str_radix(hex, 16) else { continue };
+            if !(0xE000..=0xF8FF).contains(&cp) {
+                continue;
+            }
+            let c = char::from_u32(cp).unwrap();
+            assert!(
+                has_glyph(font, 0, c),
+                "icon U+{cp:04X} is missing: run scripts/subset-icons.sh"
+            );
+            n += 1;
+        }
+        assert!(n >= 30, "found only {n} icons in theme.rs");
+    }
+
+    /// On a Mac, text uses San Francisco, then the Mac's own fallbacks, and
+    /// between them every character MacSweep's interface draws, plus
+    /// file names in other scripts, has a glyph.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mac_fonts_cover_the_interface_and_file_names() {
+        let defs = super::font_definitions();
+        let chain = &defs.families[&eframe::egui::FontFamily::Proportional];
+        assert_eq!(
+            chain.first().map(String::as_str),
+            Some("sf-regular"),
+            "San Francisco must load"
+        );
+        for key in ["helvetica", "apple-symbols", "arial-unicode"] {
+            assert!(chain.iter().any(|k| k == key), "{key} must load");
+        }
+        let mono = &defs.families[&eframe::egui::FontFamily::Monospace];
+        assert_eq!(mono.first().map(String::as_str), Some("menlo"));
+        let covered = |c: char| {
+            chain.iter().any(|k| {
+                let d = &defs.font_data[k];
+                has_glyph(d.font.as_ref().as_ref(), d.index, c)
+            })
+        };
+        for c in "Aaé°·—…›→✓⚠⌘€£¥日本語中文한국어Ελληνικάрусский".chars() {
+            assert!(covered(c), "no font draws {c:?}");
+        }
+    }
 }

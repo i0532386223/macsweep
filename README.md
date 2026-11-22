@@ -5,7 +5,7 @@
 # MacSweep
 
 **A free, open-source Mac cleaner written in Rust.**
-Clean junk, find big forgotten files, fully uninstall apps and remove orphaned background items, all from a ~7 MB native app.
+Clean junk, find big forgotten files and duplicates, fully uninstall apps, clean each browser site by site, and check your battery and SSD health, all from one small native app.
 
 [![Latest release](https://img.shields.io/github/v/release/nihal4/macsweep?label=download&color=c04fd0)](https://github.com/nihal4/macsweep/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -24,9 +24,9 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 ## Why MacSweep?
 
 - **Free and open source.** No subscription, no ads, no "upgrade to clean" paywall. Every line is right here.
-- **Safe by design.** It never touches your browser profiles, email, passwords or app data (see [Safety](#safety--your-data-is-never-touched)).
-- **Tiny and fast.** One native Rust binary of about 7 MB. Scans use every CPU core, and the app uses no CPU when idle.
-- **Private.** No accounts, no telemetry, no network access. Everything happens on your Mac.
+- **Safe by design.** It never touches your passwords, cookies, browser history, email or app data, and only removes a website's data if you tick that site (see [Safety](#safety--your-data-is-never-touched)).
+- **Tiny and fast.** A native Rust app, under 7 MB on Apple Silicon. It uses macOS's own fonts instead of bundling them. Scans use every CPU core, and nothing runs in the background unless you turn on the menu bar monitor.
+- **Private.** No accounts, no telemetry. Everything happens on your Mac. The only network request is one check at launch asking GitHub whether a newer version exists; nothing about you or your Mac is sent. To turn it off, create an empty file at `~/Library/Application Support/MacSweep/no-update-check`.
 
 ## Features
 
@@ -37,7 +37,11 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 | 📁 **Large & Old Files** | Finds big files in your home folder, grouped by kind (videos, archives, installers, models & data…), with a "not opened in a year" filter. |
 | 🗂️ **Duplicates** | Finds exact duplicate files (same size and same BLAKE3 content hash) in Desktop, Documents, Downloads, Pictures, Movies and Music. Always keeps at least one copy, never looks inside Photos/Music libraries or app data, and moves extras to the Trash. |
 | 📦 **Uninstaller** | Every app with its icon, version, App Store / Apple Silicon / Intel badges, last-opened date and **true size including leftovers**. Select several apps at once. |
+| 🌐 **Browser Cleanup** | For Chrome, Brave, Edge, Arc, Vivaldi, Opera and Chromium: the AI models each browser downloaded (like Chrome's Gemini Nano), website data per site and profile (where **web games keep their saves**, never ticked for you) and cache. Filter by profile, search and sort. Passwords, cookies, history, bookmarks and sign-ins are never touched. |
 | 🚀 **Launch Agents** | Lists background helpers and flags **orphaned** ones whose app is already gone. |
+| ❤️ **Mac Health** | Battery health (Apple's own Maximum Capacity and Condition, cycle count), SSD health (lifespan used, spare blocks, data written, errors) and system details. Every value comes from macOS itself and is [validated against Apple's tools](docs/health-validation.md). |
+| 📊 **Menu bar monitor** | Optional and off by default: live CPU, memory and free disk space in the menu bar, from a separate tiny helper. [Measured cost](CHANGELOG.md#v030): 2.2% of one core at live updates, 0.5% at every 5 s. |
+| 🔔 **Update notice** | When a new version is published, the sidebar tells you and links to it. One request to GitHub at launch; nothing about you is sent. |
 | 💾 **Live disk & Trash** | The sidebar always shows free space and Trash size, updates instantly after every clean, and has a one-click **Empty Trash**. |
 
 <table>
@@ -48,6 +52,10 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 <tr>
 <td><img src="docs/system-junk.jpg" alt="System Junk"></td>
 <td><img src="docs/cleaned.jpg" alt="Cleaned"></td>
+</tr>
+<tr>
+<td><img src="docs/browser-cleanup.jpg" alt="Browser Cleanup: AI models, website data and cache per browser and profile"></td>
+<td><img src="docs/mac-health.jpg" alt="Mac Health: battery capacity, condition and SSD health"></td>
 </tr>
 </table>
 
@@ -84,17 +92,26 @@ Clean junk, find big forgotten files, fully uninstall apps and remove orphaned b
 3. Open the app from Applications, not by running the binary in Terminal. From Terminal, the permission belongs to Terminal instead.
 </details>
 
+## Updating
+
+When a new version is out, MacSweep shows it in the sidebar (from v0.3.0 on; older versions can't). To update:
+
+1. Download the new zip from [Releases](https://github.com/nihal4/macsweep/releases/latest), unzip it, quit MacSweep, and replace the copy in **Applications**.
+2. **Turn Full Disk Access on again.** Releases aren't signed with an Apple developer certificate yet, so macOS treats each new version as a new app: in System Settings → Privacy & Security → Full Disk Access, remove MacSweep with **–**, add it again with **+**, and reopen it.
+3. If you use the menu bar monitor, it switches to the new version by itself.
+
 ## Safety — your data is never touched
 
 Some cleaners have wiped people's browser profiles and email. MacSweep is built so that **can't happen**:
 
 - **Allowlist, not blocklist.** Junk cleaning can only delete *inside* a fixed list of cache, log and build folders (`JUNK_ROOTS` in [`src/fsutil.rs`](src/fsutil.rs)). Every path is checked again right before deletion.
-- **Never touched:** browser profiles (Chrome, Brave, Firefox, Safari: history, passwords, bookmarks, logins), Mail, Messages, Keychains, cookies, app containers, `~/Library/Application Support`, and your documents. For browsers, only the disposable download cache is cleaned.
+- **Never touched by junk cleaning:** browser profiles (Chrome, Brave, Firefox, Safari: history, passwords, bookmarks, logins), Mail, Messages, Keychains, cookies, app containers, `~/Library/Application Support`, and your documents. For browsers, only the disposable download cache is cleaned.
+- **Browser Cleanup only removes what you tick.** It can remove a browser's AI models, cache, and a website's stored data (its databases, offline files and file storage, where web games keep saves), but website data is never ticked for you and goes to the Trash. Passwords, cookies, history, bookmarks, extensions' data and Local Storage (where sign-ins live) are never listed and can't be removed: an allowlist refuses any other folder. A browser that is open is never cleaned.
 - **Sign-in and sync caches are skipped:** iCloud, CloudKit, Apple ID, Wallet, Family, and anything named like a password manager, token, auth, account or login.
 - **The Uninstaller keeps your data unless you ask.** Leftovers are split into *safe to remove* (cache, logs, preferences, window state) and **Your data** (profiles, containers, cookies, web storage), which is never pre-selected.
-- **Recoverable by default.** Apps, large files and launch agents go to the Trash. Only junk is deleted permanently, after you click Clean.
+- **Recoverable by default.** Apps, large files, launch agents, and browsers' AI models and website data go to the Trash. Only junk and browser cache are deleted permanently, after you click Clean.
 - Apple's own apps are never listed in the Uninstaller.
-- Automated tests (`cargo test`) check that browser profiles, Mail, keychains, cookies, Documents and `../` path tricks can never be deleted.
+- Automated tests (`cargo test`) check that browser profiles, Mail, keychains, cookies, Documents and `../` path tricks can never be deleted by junk cleaning, and that Browser Cleanup refuses passwords, cookies, Local Storage, extensions' data and the profile itself.
 
 ## Build from source
 
@@ -109,8 +126,10 @@ UNIVERSAL=1 ./bundle.sh     # Apple Silicon + Intel in one app
 ## Roadmap
 
 - [x] Duplicate file finder (v0.2)
-- [ ] Menu-bar mini monitor (disk, RAM, CPU)
-- [ ] Browser cache cleanup per browser (cache only, never profiles)
+- [x] Menu-bar mini monitor (disk, RAM, CPU) (v0.3)
+- [x] Mac Health: battery, SSD and system health (v0.3)
+- [x] Browser Cleanup: AI models, website data and cache per browser and profile (v0.3)
+- [ ] Firefox and Safari in Browser Cleanup
 - [ ] Scheduled scans and reminders
 - [ ] Homebrew install (`brew install --cask macsweep`)
 - [ ] Notarized builds
@@ -126,9 +145,11 @@ Pull requests are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md). The o
 - [Rust](https://www.rust-lang.org) with [egui](https://github.com/emilk/egui) (OpenGL), with no web view inside
 - [`jwalk`](https://crates.io/crates/jwalk) + [`rayon`](https://crates.io/crates/rayon) for parallel scanning
 - [`trash`](https://crates.io/crates/trash) for Finder-compatible Trash, [`icns`](https://crates.io/crates/icns) for app icons, [`plist`](https://crates.io/crates/plist) for app metadata
-- San Francisco (the system font) is memory-mapped instead of bundled
+- No bundled text fonts: San Francisco and the Mac's own fallback fonts are memory-mapped from disk; the icon font holds only the icons used
+- The menu bar monitor is a separate tiny native app (AppKit through [`objc2`](https://crates.io/crates/objc2)), so MacSweep itself doesn't stay open
+- Browser Cleanup reads Chrome's own indexes with a small read-only LevelDB reader, and website icons from the browser's icon database with the system SQLite
 
-Releases are built by GitHub Actions: push a tag such as `v0.2.0` and a universal `.app` is attached to a new release, with notes taken from [CHANGELOG.md](CHANGELOG.md).
+Releases are built by GitHub Actions: push a tag such as `v0.3.0` and a universal `.app` is attached to a new release, with notes taken from [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

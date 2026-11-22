@@ -55,7 +55,7 @@ fn remove(targets: Vec<(PathBuf, bool)>) -> String {
     let uid = unsafe { libc::getuid() };
     for (p, is_user) in &targets {
         if *is_user {
-            let _ = Command::new("launchctl")
+            let _ = Command::new("/bin/launchctl")
                 .args(["bootout", &format!("gui/{uid}")])
                 .arg(p)
                 .status();
@@ -215,6 +215,9 @@ impl Agents {
                                         theme::badge(ui, "Orphaned", theme::WARN);
                                     }
                                     theme::badge(ui, it.scope, Color32::from_white_alpha(120));
+                                    if it.label == crate::monitor::LABEL {
+                                        theme::badge(ui, "MacSweep's menu bar monitor", theme::MONITOR.accent);
+                                    }
                                     ui.with_layout(Layout::top_down(egui::Align::Min), |ui| {
                                         let r = ui.add(
                                             egui::Label::new(theme::semi(&it.label, 14.0))

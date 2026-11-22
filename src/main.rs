@@ -1,11 +1,20 @@
 mod agents;
+mod browsers;
+mod browsers_ui;
 mod dupes;
 mod fsutil;
+mod health;
+mod health_ui;
 mod job;
 mod junk;
 mod large;
+mod leveldb;
+mod monitor;
+#[path = "../monitor/src/shared.rs"]
+mod shared;
 mod theme;
 mod uninstall;
+mod update;
 
 use eframe::egui::{self, Align2, Color32, Layout, Sense, Ui, vec2};
 use job::Job;
@@ -18,11 +27,22 @@ enum Pane {
     Large,
     Dupes,
     Apps,
+    Browsers,
     Agents,
+    Health,
 }
 
 impl Pane {
-    const ALL: [Pane; 6] = [Pane::Smart, Pane::Junk, Pane::Large, Pane::Dupes, Pane::Apps, Pane::Agents];
+    const ALL: [Pane; 8] = [
+        Pane::Smart,
+        Pane::Junk,
+        Pane::Large,
+        Pane::Dupes,
+        Pane::Apps,
+        Pane::Browsers,
+        Pane::Agents,
+        Pane::Health,
+    ];
     fn title(self) -> &'static str {
         match self {
             Pane::Smart => "Smart Scan",
@@ -30,7 +50,9 @@ impl Pane {
             Pane::Large => "Large & Old Files",
             Pane::Dupes => "Duplicates",
             Pane::Apps => "Uninstaller",
+            Pane::Browsers => "Browser Cleanup",
             Pane::Agents => "Launch Agents",
+            Pane::Health => "Mac Health",
         }
     }
     fn glyph(self) -> &'static str {
@@ -40,7 +62,9 @@ impl Pane {
             Pane::Large => icon::FOLDER,
             Pane::Dupes => icon::COPY,
             Pane::Apps => icon::PACKAGE,
+            Pane::Browsers => icon::GLOBE,
             Pane::Agents => icon::ROCKET_LAUNCH,
+            Pane::Health => icon::HEART,
         }
     }
     fn palette(self) -> Palette {
@@ -50,7 +74,9 @@ impl Pane {
             Pane::Large => theme::LARGE,
             Pane::Dupes => theme::DUPES,
             Pane::Apps => theme::APPS,
+            Pane::Browsers => theme::BROWSERS,
             Pane::Agents => theme::AGENTS,
+            Pane::Health => theme::HEALTH,
         }
     }
 }
@@ -166,13 +192,20 @@ struct App {
     large: large::Large,
     dupes: dupes::Dupes,
     apps: uninstall::Uninstaller,
+    browsers: browsers_ui::BrowsersPane,
     agents: agents::Agents,
+    health: health_ui::HealthPane,
     sys: Sys,
+    /// Asking GitHub whether a newer MacSweep exists (once, at launch).
+    update_job: Option<Job<Option<update::Release>>>,
+    new_release: Option<update::Release>,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::setup(&cc.egui_ctx);
+        // If MacSweep was moved or updated, keep the monitor pointing at this copy.
+        std::thread::spawn(monitor::repair_on_launch);
         Self {
             failure: None,
             pane: Pane::Smart,
@@ -182,8 +215,12 @@ impl App {
             large: Default::default(),
             dupes: Default::default(),
             apps: Default::default(),
+            browsers: Default::default(),
             agents: Default::default(),
+            health: Default::default(),
             sys: Sys::new(),
+            update_job: Some(Job::spawn(&cc.egui_ctx, |_, _| update::check())),
+            new_release: None,
         }
     }
 
@@ -282,6 +319,31 @@ impl App {
                                 }
                             });
                             });
+                        });
+                }
+
+                if let Some(r) = job::poll(&mut self.update_job, ui.ctx()) {
+                    self.new_release = r;
+                }
+                if let Some(r) = &self.new_release {
+                    ui.add_space(10.0);
+                    egui::Frame::new()
+                        .fill(self.pane.palette().accent.gamma_multiply(0.35))
+                        .corner_radius(10)
+                        .inner_margin(8)
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.label(theme::semi(
+                                format!("{}  MacSweep {} is available", icon::ARROW_CIRCLE_UP, r.version),
+                                12.5,
+                            ));
+                            ui.label(theme::dim(
+                                format!("You have {}. See what's new and download it.", env!("CARGO_PKG_VERSION")),
+                                11.0,
+                            ));
+                            if ui.link(theme::text("Open the release page", 12.0)).clicked() {
+                                fsutil::open(&r.url);
+                            }
                         });
                 }
 
@@ -562,12 +624,26 @@ impl eframe::App for App {
                 Pane::Large => self.large.ui(ui, p),
                 Pane::Dupes => self.dupes.ui(ui, p),
                 Pane::Apps => self.apps.ui(ui, p),
+                Pane::Browsers => self.browsers.ui(ui, p),
                 Pane::Agents => self.agents.ui(ui, p),
+                Pane::Health => self.health.ui(ui, p),
             });
     }
 }
 
 fn main() -> eframe::Result {
+    // `MacSweep --health-report` prints the Mac Health values and exits.
+    // scripts/validate-health.sh compares them with Apple's own tools.
+    // `MacSweep --browser-report` lists what Browser Cleanup finds, with paths.
+    if std::env::args().any(|a| a == "--browser-report") {
+        println!("{}", browsers::report(&browsers::scan()));
+        return Ok(());
+    }
+    if std::env::args().any(|a| a == "--health-report") {
+        println!("{}", health::report(&health::collect()));
+        return Ok(());
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("MacSweep")

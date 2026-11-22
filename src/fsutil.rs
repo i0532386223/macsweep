@@ -14,7 +14,7 @@ pub fn changes() -> u64 {
     CHANGES.load(Ordering::Relaxed)
 }
 
-fn bump() {
+pub fn bump() {
     CHANGES.fetch_add(1, Ordering::Relaxed);
 }
 
@@ -53,7 +53,7 @@ pub fn app_size(p: &Path) -> u64 {
     if s > 0 {
         return s;
     }
-    Command::new("du")
+    Command::new("/usr/bin/du")
         .arg("-sk")
         .arg(&real)
         .output()
@@ -123,12 +123,12 @@ pub fn fmt_age(t: Option<SystemTime>) -> String {
 }
 
 pub fn reveal(p: &Path) {
-    let _ = Command::new("open").arg("-R").arg(p).spawn();
+    let _ = Command::new("/usr/bin/open").arg("-R").arg(p).spawn();
 }
 
 /// Opens macOS Quick Look (the Space-bar preview) for a file.
 pub fn quick_look(p: &Path) {
-    let _ = Command::new("qlmanage")
+    let _ = Command::new("/usr/bin/qlmanage")
         .arg("-p")
         .arg(p)
         .stdout(std::process::Stdio::null())
@@ -137,7 +137,7 @@ pub fn quick_look(p: &Path) {
 }
 
 pub fn open(target: &str) {
-    let _ = Command::new("open").arg(target).spawn();
+    let _ = Command::new("/usr/bin/open").arg(target).spawn();
 }
 
 // ---------- safety ----------
@@ -358,7 +358,7 @@ fn trash_with_admin(paths: &[PathBuf]) -> bool {
         "do shell script \"{}\" with administrator privileges with prompt \"MacSweep needs your password to move these items to the Trash.\"",
         script.replace('\\', "\\\\").replace('"', "\\\"")
     );
-    match Command::new("osascript").args(["-e", &applescript]).output() {
+    match Command::new("/usr/bin/osascript").args(["-e", &applescript]).output() {
         // -128 is "User canceled" in AppleScript.
         Ok(o) => !String::from_utf8_lossy(&o.stderr).contains("-128"),
         Err(_) => true,
@@ -409,7 +409,7 @@ fn remove_any(p: &Path) -> std::io::Result<()> {
 
 /// Files marked "Locked" in Finder can't be deleted until unlocked.
 fn unlock_and_remove(p: &Path) -> std::io::Result<()> {
-    let _ = Command::new("chflags").arg("-R").arg("nouchg").arg(p).status();
+    let _ = Command::new("/usr/bin/chflags").arg("-R").arg("nouchg").arg(p).status();
     remove_any(p)
 }
 
@@ -450,7 +450,10 @@ pub fn finder_available() -> Option<u64> {
 var u=$.NSURL.fileURLWithPath('/');var r=Ref();\
 u.getResourceValueForKeyError(r,$.NSURLVolumeAvailableCapacityForImportantUsageKey,null);\
 String(r[0].longLongValue)";
-    let out = Command::new("osascript").args(["-l", "JavaScript", "-e", JS]).output().ok()?;
+    let out = Command::new("/usr/bin/osascript")
+        .args(["-l", "JavaScript", "-e", JS])
+        .output()
+        .ok()?;
     parse_bytes(&String::from_utf8_lossy(&out.stdout))
 }
 
@@ -497,7 +500,8 @@ pub fn app_bundle() -> Option<PathBuf> {
 /// newly granted Full Disk Access to a freshly started app.
 pub fn relaunch() {
     if let Some(app) = app_bundle() {
-        let script = format!("sleep 1; open -n {:?}", app);
+        // Single-quoted for the shell: a folder name with $ or ` can't run anything.
+        let script = format!("sleep 1; /usr/bin/open -n {}", sh_quote(&app.to_string_lossy()));
         if Command::new("/bin/sh").arg("-c").arg(script).spawn().is_ok() {
             std::process::exit(0);
         }

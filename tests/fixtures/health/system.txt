@@ -1,0 +1,10 @@
+Note: No thermal warning level has been recorded
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
+hw.model: MacBookAir10,1
+hw.memsize: 8589934592
+machdep.cpu.brand_string: Apple M1
+ProductName:		macOS
+ProductVersion:		27.3
+BuildVersion:		26C5047e
+ 1:54  up  9:23, 4 users, load averages: 3.18 2.31 2.19
