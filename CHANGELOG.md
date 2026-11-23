@@ -1,5 +1,71 @@
 # Changelog
 
+## v0.3.0
+
+### New: Mac Health
+- **Battery:** Apple's own Maximum Capacity and Condition (the same values System Settings shows), charge cycles against the number the battery is designed for, the current charge, and the battery's raw mAh readings.
+- **Storage:** macOS's own S.M.A.R.T. verdict plus the SSD's health log: share of its rated lifespan used, spare blocks left, data written and read, power-on hours, unexpected power losses, error counts and temperature.
+- **System:** model, chip, memory, macOS version, uptime, thermal state, memory in use with memory pressure, and swap.
+- Nothing is estimated. If macOS doesn't report a value, MacSweep shows "Not available". Hover any value to see where it comes from.
+
+**Validated:** on a MacBook Air M1 (macOS 27.3), all 23 values with a reference tool match Apple's tools (System Settings, `system_profiler`, `ioreg`, `sysctl`) and smartctl exactly. Two live values (temperature, data read) differed by a hair because the tools read seconds apart. Full table and method: [docs/health-validation.md](docs/health-validation.md). Run `scripts/validate-health.sh` to check your own Mac.
+
+Apple calculates Maximum Capacity its own way. On the test Mac the raw mAh ratios were 89% and 86% while Apple showed 90%, so MacSweep never calculates it and always shows Apple's figure.
+
+### New: menu bar monitor (optional, off by default)
+- Shows CPU, memory and free disk space in the menu bar (`CPU 12%  RAM 61%  120 GB free`). Choose which, and update **live (every second)**, every 2 s or every 5 s.
+- A separate tiny native helper, so MacSweep itself doesn't stay open. Settings apply instantly. Turning it off, in Mac Health or from its own menu, removes it completely.
+- Its menu shows details (memory pressure, disk space) and what the monitor itself is using.
+
+**Measured cost** on a MacBook Air M1, macOS 27.3, 5 minutes per setting (`scripts/bench-monitor.sh`):
+
+| Update rate | CPU (of one core) | Energy Impact | Memory (Activity Monitor), avg / max |
+|---|---|---|---|
+| Live (1 s) | 2.21 % | 2.29 | 12.8 / 14.7 MB |
+| Every 2 s | 1.33 % | 1.34 | 18.5 / 22.0 MB |
+| Every 5 s | 0.46 % | 0.28 | 20.0 / 22.0 MB |
+
+A **1-hour run at Live** showed no memory growth: 13.1 MB on average, never above 14.7 MB, at 2.34 % CPU and Energy Impact 2.25.
+
+The M1 has 8 cores, so Live is about 0.3 % of the whole Mac. Profiling showed our own code is under 1 ms per update. The rest is macOS redrawing the menu-bar item, which every monitor that updates each second pays. We tried drawing the numbers as an image instead of text: no measurable difference, so the simpler text stays.
+
+- The monitor stops completely while the screen is off or another user's session is in front, and restarts itself when MacSweep is updated.
+- It must run from your Applications folder (not Downloads or a disk image), so it keeps working after a restart.
+
+### New: Browser Cleanup
+See what each browser keeps on your Mac, sorted into three groups, and choose exactly what goes. Supports Chrome, Brave, Edge, Arc, Vivaldi, Opera and Chromium; one section per browser, with its own logo.
+- **AI models** the browser downloaded, such as Chrome's Gemini Nano and its scam detection model, each with what it does and its version. Removed models go to the Trash. Chrome downloads them again unless On-device AI is turned off, so a button opens that setting.
+- **Website data**, one line per website and profile, with the site's own icon: databases, offline files and file storage. **This is where web games keep saves and downloaded game files**, so nothing here is ticked for you, and the confirmation names every site and warns that its saves go and you may be signed out. Removed data goes to the Trash.
+- **Cache** (pages, compiled scripts, graphics), which browsers rebuild. The only group ticked by default; deleted outright.
+- Filter by profile, search, and sort by size, profile, name or last use. Only lines that are both ticked and shown are cleaned.
+- **Never touched:** passwords, cookies, history, bookmarks, extensions' data and Local Storage (where sign-ins live). An allowlist refuses any other folder, and a browser that is open is never cleaned.
+- Website icons come from the browser's own icon database, read without changing it. Nothing is fetched online, so no server learns which sites you visit.
+
+**Validated** on a MacBook Air M1 (macOS 27.3) with 5 Chrome profiles and Brave:
+- Chrome names website folders by code (`6c531fa0…`, `018`). MacSweep traced every one back to its website from Chrome's own indexes; none was left unnamed. The largest, 3.8 GB, was **web.nfsmwo.com**, a browser game, whose saves a blind "clear cache" would have deleted. Other web games found: nfsu2.xyz, a crazygames.com game, dos.zone.
+- AI models found: 208.7 MB (scam detection model, small feature models, address-bar suggestions). Gemini Nano was not downloaded on this Mac. Turning off On-device AI in Chrome's settings made Chrome delete its scam detection model itself; the small feature models and the address-bar model stayed, because that setting doesn't cover them. MacSweep lists what's left after the change.
+- A real clean of website data and cache in Brave left Brave and the cleaned sites working normally.
+- `MacSweep --browser-report` prints everything the scan finds, with every path, so you can check it on your own Mac. It changes nothing.
+
+### New: update notice
+- When a newer version is published, the sidebar says so and links to its release page. MacSweep asks GitHub once at launch, using macOS's own `curl`; nothing about you or your Mac is sent, and any failure (offline, no answer) is silent.
+- To turn it off, create an empty file at `~/Library/Application Support/MacSweep/no-update-check`.
+- Versions before 0.3.0 can't show this notice. If you know someone on 0.1 or 0.2, point them to the Releases page once.
+
+### Updating from 0.1 or 0.2
+Replace MacSweep in Applications with this version, then **turn Full Disk Access on again**: in System Settings → Privacy & Security → Full Disk Access, remove MacSweep with –, add it again with +, and reopen it. Releases aren't signed with an Apple developer certificate yet, so macOS treats each version as a new app.
+
+### Security
+- Every system command is called by its full path (`/bin/launchctl`, `/usr/bin/osascript` …), so a changed `PATH` can't substitute another program.
+- The "Relaunch" button after granting Full Disk Access quoted the app's path unsafely for the shell; a folder name containing `$` or a backtick could run a command. Fixed.
+- The release pipeline pins every third-party GitHub Action to an exact commit, and CI runs with read-only permissions.
+
+### Smaller
+- The app is about 1.1 MB smaller (7.6 MB → 6.6 MB on Apple Silicon) with nothing lost: the icon font holds only the 37 icons used, and egui's bundled text fonts are replaced by the Mac's own (San Francisco, Helvetica, Apple Symbols, Arial Unicode, Menlo), which also draw Chinese, Japanese, Korean, Greek and Cyrillic file names the old fonts couldn't.
+
+### Development
+- `main` is protected: every change goes through a pull request, and CI (formatting, tests, app build) must pass.
+
 ## v0.2.0
 
 ### New: Duplicates

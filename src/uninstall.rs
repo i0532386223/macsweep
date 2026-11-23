@@ -432,7 +432,7 @@ fn find_apps() -> Vec<AppInfo> {
 // ---------- icons ----------
 
 /// Decodes the app's .icns into a small 64×64 RGBA image.
-fn load_icon(app: &Path, icon_file: Option<&str>) -> Option<ColorImage> {
+pub fn load_icon(app: &Path, icon_file: Option<&str>) -> Option<ColorImage> {
     let real = std::fs::canonicalize(app).ok()?;
     let mut name = icon_file.unwrap_or("AppIcon").to_string();
     if !name.ends_with(".icns") {
@@ -456,10 +456,10 @@ fn load_icon(app: &Path, icon_file: Option<&str>) -> Option<ColorImage> {
 
 /// Newer apps keep their icon in an asset catalog instead of an .icns file.
 /// For those, ask macOS (Quick Look) to render the icon Finder shows.
-fn system_icon(app: &Path) -> Option<ColorImage> {
+pub fn system_icon(app: &Path) -> Option<ColorImage> {
     let dir = std::env::temp_dir().join(format!("macsweep-icons-{}", std::process::id()));
     std::fs::create_dir_all(&dir).ok()?;
-    Command::new("qlmanage")
+    Command::new("/usr/bin/qlmanage")
         .args(["-t", "-s", "128", "-o"])
         .arg(&dir)
         .arg(app)
@@ -474,9 +474,28 @@ fn system_icon(app: &Path) -> Option<ColorImage> {
 }
 
 fn decode_png(path: &Path) -> Option<ColorImage> {
-    let mut dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
+    // App icons go up to 1024 px (512 pt @2x).
+    decode_png_from(std::io::BufReader::new(std::fs::File::open(path).ok()?), 1024)
+}
+
+/// A PNG held in memory (e.g. a website's icon from the browser's database).
+/// Website icons are small (MacSweep asks for 16–128 px); anything claiming
+/// to be bigger than 256 px is refused before any memory is set aside.
+pub fn decode_png_bytes(bytes: &[u8]) -> Option<ColorImage> {
+    decode_png_from(std::io::Cursor::new(bytes), 256)
+}
+
+/// Decodes a PNG no wider or taller than `max_side` pixels. The size the
+/// file claims is checked before decoding, so a file claiming to be huge
+/// can't make MacSweep set aside lots of memory.
+fn decode_png_from<R: std::io::BufRead + std::io::Seek>(reader: R, max_side: u32) -> Option<ColorImage> {
+    let mut dec = png::Decoder::new_with_limits(reader, png::Limits { bytes: 16 * 1024 * 1024 });
     dec.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut r = dec.read_info().ok()?;
+    let info = r.info();
+    if info.width == 0 || info.height == 0 || info.width > max_side || info.height > max_side {
+        return None;
+    }
     let mut buf = vec![0u8; r.output_buffer_size()?];
     let info = r.next_frame(&mut buf).ok()?;
     let (w, h) = (info.width as usize, info.height as usize);
@@ -523,7 +542,7 @@ fn downscale(src: &[u8], w: usize, h: usize) -> ColorImage {
 }
 
 fn last_opened(app: &Path) -> String {
-    let out = Command::new("mdls")
+    let out = Command::new("/usr/bin/mdls")
         .args(["-raw", "-name", "kMDItemLastUsedDate"])
         .arg(app)
         .output();
@@ -538,7 +557,7 @@ fn last_opened(app: &Path) -> String {
 }
 
 fn osascript(script: &str) -> String {
-    Command::new("osascript")
+    Command::new("/usr/bin/osascript")
         .args(["-e", script])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -567,7 +586,7 @@ fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
         let agents = fsutil::home().join("Library/LaunchAgents");
         let uid = unsafe { libc::getuid() };
         for l in a.leftovers.iter().filter(|l| l.selected && l.path.starts_with(&agents)) {
-            let _ = Command::new("launchctl")
+            let _ = Command::new("/bin/launchctl")
                 .args(["bootout", &format!("gui/{uid}")])
                 .arg(&l.path)
                 .stdout(std::process::Stdio::null())
@@ -1064,6 +1083,48 @@ impl Uninstaller {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A minimal PNG header claiming the given size, with no image data.
+    fn png_claiming(w: u32, h: u32) -> Vec<u8> {
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&w.to_be_bytes());
+        ihdr.extend_from_slice(&h.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+        let mut chunk = b"IHDR".to_vec();
+        chunk.extend_from_slice(&ihdr);
+        let crc = {
+            let mut c = 0xffff_ffffu32;
+            for &b in &chunk {
+                c ^= u32::from(b);
+                for _ in 0..8 {
+                    c = if c & 1 != 0 { 0xedb8_8320 ^ (c >> 1) } else { c >> 1 };
+                }
+            }
+            !c
+        };
+        let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+        out.extend_from_slice(&13u32.to_be_bytes());
+        out.extend_from_slice(&chunk);
+        out.extend_from_slice(&crc.to_be_bytes());
+        out
+    }
+
+    #[test]
+    fn oversized_website_icons_are_refused_before_decoding() {
+        // Claims 60000 x 60000 px (about 14 GB of pixels): refused at once.
+        assert!(decode_png_bytes(&png_claiming(60_000, 60_000)).is_none());
+        assert!(decode_png_bytes(&png_claiming(257, 16)).is_none());
+        assert!(decode_png_bytes(b"not a png").is_none());
+        // A normal 32 px icon still decodes.
+        let mut ok = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut ok, 32, 32);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            enc.write_header().unwrap().write_image_data(&[200u8; 32 * 32 * 4]).unwrap();
+        }
+        assert!(decode_png_bytes(&ok).is_some());
+    }
     use std::fs;
 
     fn tmp(name: &str) -> PathBuf {

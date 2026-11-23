@@ -1,0 +1,70 @@
+NVMExpress:
+
+    Apple SSD Controller:
+
+        APPLE SSD AP0256Q:
+
+          Capacity: 251 GB (251,000,193,024 bytes)
+          TRIM Support: Yes
+          Model: APPLE SSD AP0256Q
+          Revision: 591.40.3
+          Serial Number: REDACTED
+          Detachable Drive: No
+          BSD Name: disk0
+          Partition Map Type: GPT (GUID Partition Table)
+          Removable Media: No
+          S.M.A.R.T. status: Verified
+          Volumes:
+            iSCPreboot:
+              Capacity: 524.3 MB (524,288,000 bytes)
+              BSD Name: disk0s1
+              Content: Apple_APFS_ISC
+            Macintosh HD:
+              Capacity: 245.11 GB (245,107,195,904 bytes)
+              BSD Name: disk0s2
+              Content: Apple_APFS
+            Recovery:
+              Capacity: 5.37 GB (5,368,664,064 bytes)
+              BSD Name: disk0s3
+              Content: Apple_APFS_Recovery
+
+Storage:
+
+    Data:
+
+      Free: 63.3 GB (63,298,420,736 bytes)
+      Capacity: 245.11 GB (245,107,195,904 bytes)
+      Mount Point: /System/Volumes/Data
+      File System: APFS
+      Writable: Yes
+      Ignore Ownership: No
+      BSD Name: disk3s5
+      Volume UUID: A22A84F1-A28E-45EC-BF8F-E7A997F643FE
+      Physical Drive:
+          Device Name: APPLE SSD AP0256Q
+          Media Name: AppleAPFSMedia
+          Medium Type: SSD
+          Protocol: Apple Fabric
+          Internal: Yes
+          Partition Map Type: Unknown
+          S.M.A.R.T. Status: Verified
+
+    Macintosh HD:
+
+      Free: 63.3 GB (63,298,408,448 bytes)
+      Capacity: 245.11 GB (245,107,195,904 bytes)
+      Mount Point: /
+      File System: APFS
+      Writable: No
+      Ignore Ownership: No
+      BSD Name: disk3s1s1
+      Volume UUID: 035A7A60-B362-4DC5-A2B4-57D69006BF5B
+      Physical Drive:
+          Device Name: APPLE SSD AP0256Q
+          Media Name: AppleAPFSMedia
+          Medium Type: SSD
+          Protocol: Apple Fabric
+          Internal: Yes
+          Partition Map Type: Unknown
+          S.M.A.R.T. Status: Verified
+

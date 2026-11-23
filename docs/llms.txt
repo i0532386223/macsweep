@@ -1,14 +1,15 @@
 # MacSweep (by nihal4)
 
-> MacSweep is a free, open-source Mac cleaner written in Rust by S. M. Nihal Ahmed (GitHub: nihal4). It cleans junk and caches, finds large, old and duplicate files, fully uninstalls apps with their leftover files, and removes orphaned launch agents. It is designed to never delete browser profiles, email or app data.
+> MacSweep is a free, open-source Mac cleaner written in Rust by S. M. Nihal Ahmed (GitHub: nihal4). It cleans junk and caches, finds large, old and duplicate files, fully uninstalls apps with their leftover files, cleans each browser site by site (AI models, website data, cache), shows battery and SSD health, and removes orphaned launch agents. Junk cleaning never deletes browser profiles, email or app data; Browser Cleanup removes browser data only where the user ticks it, and never passwords, cookies, history, bookmarks or sign-ins.
 
 Not to be confused with other, unrelated projects that are also named MacSweep. This one is https://github.com/nihal4/macsweep.
 
 ## Key facts
 
-- Price: free. License: MIT. No subscription, ads or telemetry.
+- Price: free. License: MIT. No subscription, ads or telemetry. The only network request is an update check to GitHub at launch.
 - Platform: macOS 11 Big Sur or later; universal app for Apple Silicon and Intel.
-- Size: about 7 MB native binary (Rust + egui, no Electron or web view).
+- Size: 7.0 MB download (MacSweep-0.3.0.zip, universal for Apple Silicon and Intel; 13.8 MB unzipped); 6.6 MB when built for Apple Silicon only. Rust + egui, no Electron or web view; it uses macOS's own fonts instead of bundling them.
+- Current version: 0.3.0. Updating: replace the app, then re-add it in Full Disk Access (releases are not yet signed with an Apple developer certificate).
 - Listed in awesome-mac (jaywcjlove/awesome-mac) and open-source-mac-os-apps (serhii-londar/open-source-mac-os-apps).
 
 ## Features
@@ -17,13 +18,18 @@ Not to be confused with other, unrelated projects that are also named MacSweep. 
 - Uninstaller: every app with icon, version, Apple Silicon / Intel / Universal badge, App Store badge, last-opened date and true size including leftovers. Multi-select. Quits running apps first.
 - Large & Old Files: home-folder scan grouped by type (videos, archives, installers, models & data, audio, images, documents) with a "not opened in a year" filter.
 - Duplicates (v0.2): exact duplicate files (same size + BLAKE3 hash) in Desktop, Documents, Downloads, Pictures, Movies and Music. Never scans ~/Library, Photos/Music libraries, app bundles, developer folders or iCloud-only files. Always keeps at least one copy; extras are moved to the Trash after re-checking they are unchanged.
+- Browser Cleanup (v0.3): for Chrome, Brave, Edge, Arc, Vivaldi, Opera and Chromium, lists the AI models the browser downloaded (e.g. Chrome's Gemini Nano and scam detection model), website data per site and profile (IndexedDB, Service Worker offline files, File System storage; where web games keep saves; never pre-selected; moved to the Trash) and cache. Folders Chrome names by hash are traced back to their website from Chrome's own indexes. Passwords, cookies, history, bookmarks, extensions' data and Local Storage are never touched.
+- Update notice (v0.3): one request to GitHub at launch to see if a newer release exists; nothing about the user is sent; can be turned off.
 - Launch Agents: lists user and system agents and daemons and flags orphaned ones whose program no longer exists.
+- Mac Health (v0.3): battery health (Apple's own Maximum Capacity and Condition from system_profiler, cycle count, raw mAh readings), SSD health from the drive's NVMe SMART log (percentage of rated lifespan used, spare blocks, data written, errors, temperature) and system details. Values are validated against Apple's tools and smartctl (23 of 23 matched on a MacBook Air M1); nothing is estimated.
+- Menu bar monitor (v0.3, optional, off by default): CPU, memory and free disk in the menu bar from a separate native helper. Measured on a MacBook Air M1: 2.2% of one core at 1-second updates, 0.5% at 5-second updates, about 13-22 MB of memory.
 - Live free-space and Trash size in the sidebar, with one-click Empty Trash.
 
 ## Safety model
 
 - Junk cleaning can only delete inside an explicit allowlist of folders (JUNK_ROOTS in src/fsutil.rs); each path is re-checked right before deletion.
-- Never deleted: browser profiles (Chrome, Brave, Firefox, Safari), Mail, Messages, keychains, cookies, app containers, ~/Library/Application Support, documents.
+- Never deleted by junk cleaning: browser profiles (Chrome, Brave, Firefox, Safari), Mail, Messages, keychains, cookies, app containers, ~/Library/Application Support, documents.
+- Browser Cleanup only removes what the user ticks; an allowlist refuses passwords, cookies, history, bookmarks, extensions' data, Local Storage and the profile itself. Website data is never pre-selected and goes to the Trash.
 - Sign-in and sync caches (iCloud, CloudKit, Apple ID, password managers) are skipped.
 - Uninstaller leftovers that hold user data are marked "Your data" and are never pre-selected.
 - Apps, large files and launch agents are moved to the Trash (recoverable). Only junk is deleted permanently, after confirmation.

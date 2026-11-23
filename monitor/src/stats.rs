@@ -1,0 +1,322 @@
+//! Reads CPU, memory and disk numbers straight from the macOS kernel.
+//! Every call here takes microseconds: no subprocesses, no file scanning.
+
+pub use crate::shared::Config;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Pressure {
+    Normal,
+    Warning,
+    Critical,
+}
+
+impl Pressure {
+    pub fn from_level(level: i32) -> Self {
+        match level {
+            4 => Self::Critical,
+            2 => Self::Warning,
+            _ => Self::Normal,
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "Normal",
+            Self::Warning => "High",
+            Self::Critical => "Critical",
+        }
+    }
+}
+
+/// Page counts from the kernel's VM statistics.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PageCounts {
+    /// All physical memory, in pages.
+    pub total: u64,
+    /// Free pages (the kernel's free count, which includes speculative pages).
+    pub free: u64,
+    /// File-backed pages: the "Cached Files" macOS can drop at once.
+    pub file_backed: u64,
+    pub purgeable: u64,
+}
+
+/// Activity Monitor's "Memory Used": all physical memory minus free memory
+/// and cached files. Checked on a MacBook Air M1 in two side-by-side readings
+/// (6.89 and 6.63 GB). Adding up app + wired + compressed gave about 0.55 GB
+/// less, because some memory in use isn't listed in any of those categories.
+pub fn memory_used_pages(p: PageCounts) -> u64 {
+    p.total.saturating_sub(p.free + p.file_backed + p.purgeable)
+}
+
+/// CPU busy share between two tick samples, 0–100.
+pub fn cpu_percent(prev: [u64; 4], now: [u64; 4]) -> f64 {
+    let d: Vec<u64> = (0..4).map(|i| now[i].saturating_sub(prev[i])).collect();
+    // ticks are [user, system, idle, nice]
+    let total: u64 = d.iter().sum();
+    if total == 0 {
+        return 0.0;
+    }
+    (d[0] + d[1] + d[3]) as f64 * 100.0 / total as f64
+}
+
+/// Decimal units, like Finder.
+pub fn fmt_bytes(b: u64) -> String {
+    let b = b as f64;
+    if b >= 1e12 {
+        format!("{:.1} TB", b / 1e12)
+    } else if b >= 1e9 {
+        format!("{:.0} GB", b / 1e9)
+    } else {
+        format!("{:.0} MB", b / 1e6)
+    }
+}
+
+/// The menu-bar text, e.g. "CPU 12%  RAM 61%  120 GB free".
+pub fn title(c: &Config, cpu: f64, ram_used: u64, ram_total: u64, disk_free: Option<u64>, p: Pressure) -> String {
+    let mut parts = Vec::new();
+    if c.cpu {
+        parts.push(format!("CPU {:.0}%", cpu));
+    }
+    if c.ram {
+        let pct = if ram_total > 0 {
+            ram_used as f64 * 100.0 / ram_total as f64
+        } else {
+            0.0
+        };
+        let mark = if p == Pressure::Normal { "" } else { " ⚠︎" };
+        parts.push(format!("RAM {pct:.0}%{mark}"));
+    }
+    if c.disk {
+        if let Some(f) = disk_free {
+            parts.push(format!("{} free", fmt_bytes(f)));
+        }
+    }
+    if parts.is_empty() {
+        "MacSweep".into()
+    } else {
+        parts.join("  ")
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub use mac::*;
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use std::ffi::CString;
+
+    type MachPort = u32;
+    unsafe extern "C" {
+        fn mach_host_self() -> MachPort;
+        fn host_statistics(host: MachPort, flavor: i32, info: *mut i32, count: *mut u32) -> i32;
+        fn host_statistics64(host: MachPort, flavor: i32, info: *mut i32, count: *mut u32) -> i32;
+    }
+    const HOST_CPU_LOAD_INFO: i32 = 3;
+    const HOST_VM_INFO64: i32 = 4;
+
+    /// `struct vm_statistics64` from <mach/vm_statistics.h>.
+    #[repr(C, align(8))]
+    #[derive(Default)]
+    struct VmStats64 {
+        free_count: u32,
+        active_count: u32,
+        inactive_count: u32,
+        wire_count: u32,
+        zero_fill_count: u64,
+        reactivations: u64,
+        pageins: u64,
+        pageouts: u64,
+        faults: u64,
+        cow_faults: u64,
+        lookups: u64,
+        hits: u64,
+        purges: u64,
+        purgeable_count: u32,
+        speculative_count: u32,
+        decompressions: u64,
+        compressions: u64,
+        swapins: u64,
+        swapouts: u64,
+        compressor_page_count: u32,
+        throttled_count: u32,
+        external_page_count: u32,
+        internal_page_count: u32,
+        total_uncompressed_pages_in_compressor: u64,
+    }
+
+    /// The host port, asked for once per process. Each `mach_host_self()`
+    /// call adds a reference that is never given back, so asking on every
+    /// Sampler (Mac Health makes one every 2 s) slowly leaked them.
+    fn host_port() -> MachPort {
+        static HOST: std::sync::OnceLock<MachPort> = std::sync::OnceLock::new();
+        *HOST.get_or_init(|| unsafe { mach_host_self() })
+    }
+
+    pub struct Sampler {
+        host: MachPort,
+        page: u64,
+        pub ram_total: u64,
+        prev_cpu: [u64; 4],
+    }
+
+    impl Sampler {
+        pub fn new() -> Self {
+            let host = host_port();
+            let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(4096) as u64;
+            let mut s = Self {
+                host,
+                page,
+                ram_total: sysctl_u64("hw.memsize").unwrap_or(0),
+                prev_cpu: [0; 4],
+            };
+            s.prev_cpu = s.cpu_ticks();
+            s
+        }
+
+        fn cpu_ticks(&self) -> [u64; 4] {
+            let mut t = [0u32; 4];
+            let mut count = 4u32;
+            let ok = unsafe { host_statistics(self.host, HOST_CPU_LOAD_INFO, t.as_mut_ptr().cast(), &mut count) };
+            if ok != 0 {
+                return self.prev_cpu;
+            }
+            t.map(u64::from)
+        }
+
+        /// CPU use since the last call, 0–100.
+        pub fn cpu(&mut self) -> f64 {
+            let now = self.cpu_ticks();
+            let pct = super::cpu_percent(self.prev_cpu, now);
+            self.prev_cpu = now;
+            pct
+        }
+
+        /// "Memory Used" the way Activity Monitor counts it (see `memory_used_pages`).
+        pub fn ram_used(&self) -> u64 {
+            let mut v = VmStats64::default();
+            let mut count = (std::mem::size_of::<VmStats64>() / 4) as u32;
+            let ok = unsafe { host_statistics64(self.host, HOST_VM_INFO64, (&mut v as *mut VmStats64).cast(), &mut count) };
+            if ok != 0 {
+                return 0;
+            }
+            super::memory_used_pages(super::PageCounts {
+                total: self.ram_total / self.page,
+                free: v.free_count.into(),
+                file_backed: v.external_page_count.into(),
+                purgeable: v.purgeable_count.into(),
+            }) * self.page
+        }
+    }
+
+    pub fn pressure() -> super::Pressure {
+        super::Pressure::from_level(sysctl_u64("kern.memorystatus_vm_pressure_level").unwrap_or(1) as i32)
+    }
+
+    /// Free space ignoring purgeable space; used if Foundation can't answer.
+    pub fn disk_free_plain() -> Option<u64> {
+        let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+        let root = CString::new("/").ok()?;
+        (unsafe { libc::statfs(root.as_ptr(), &mut s) } == 0).then(|| s.f_bavail * u64::from(s.f_bsize))
+    }
+
+    /// Size of the startup disk, as Finder's "Capacity".
+    pub fn disk_total() -> Option<u64> {
+        let mut s: libc::statfs = unsafe { std::mem::zeroed() };
+        let root = CString::new("/").ok()?;
+        (unsafe { libc::statfs(root.as_ptr(), &mut s) } == 0).then(|| s.f_blocks * u64::from(s.f_bsize))
+    }
+
+    /// `struct rusage_info_v0` from <sys/resource.h>.
+    #[repr(C)]
+    struct RusageV0 {
+        uuid: [u8; 16],
+        user_time: u64,
+        system_time: u64,
+        pkg_idle_wkups: u64,
+        interrupt_wkups: u64,
+        pageins: u64,
+        wired_size: u64,
+        resident_size: u64,
+        phys_footprint: u64,
+        proc_start_abstime: u64,
+        proc_exit_abstime: u64,
+    }
+
+    unsafe extern "C" {
+        fn proc_pid_rusage(pid: i32, flavor: i32, buffer: *mut RusageV0) -> i32;
+    }
+
+    /// Memory of a process the way Activity Monitor's "Memory" column counts
+    /// it (the physical footprint). Unlike resident size, it doesn't include
+    /// system libraries shared by every app.
+    pub fn footprint(pid: i32) -> Option<u64> {
+        let mut r: RusageV0 = unsafe { std::mem::zeroed() };
+        (unsafe { proc_pid_rusage(pid, 0, &mut r) } == 0).then_some(r.phys_footprint)
+    }
+
+    /// What the monitor itself uses, for its own menu.
+    pub fn own_memory() -> u64 {
+        footprint(unsafe { libc::getpid() }).unwrap_or(0)
+    }
+
+    fn sysctl_u64(name: &str) -> Option<u64> {
+        let c = CString::new(name).ok()?;
+        let mut buf = [0u8; 8];
+        let mut len = buf.len();
+        let ok = unsafe { libc::sysctlbyname(c.as_ptr(), buf.as_mut_ptr().cast(), &mut len, std::ptr::null_mut(), 0) };
+        match (ok, len) {
+            (0, 8) => Some(u64::from_ne_bytes(buf)),
+            (0, 4) => Some(u64::from(u32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]))),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn memory_used_matches_activity_monitor() {
+        // Activity Monitor on a MacBook Air M1 (16 KB pages): Physical 8.00 GB,
+        // Cached Files 1.31 GB, about 0.06 GB free → Memory Used 6.63 GB.
+        let gib = |pages: u64| pages as f64 * 16384.0 / 1_073_741_824.0;
+        let p = PageCounts {
+            total: 524_288,
+            free: 3_932,
+            file_backed: 80_000,
+            purgeable: 5_852,
+        };
+        assert_eq!(format!("{:.2}", gib(memory_used_pages(p))), "6.63");
+        assert_eq!(memory_used_pages(PageCounts { free: 600_000, ..p }), 0, "never negative");
+    }
+
+    #[test]
+    fn cpu_share_comes_from_tick_differences() {
+        // 30 busy ticks (user+system+nice) out of 100 total
+        assert_eq!(cpu_percent([100, 50, 800, 0], [120, 55, 870, 5]), 30.0);
+        assert_eq!(cpu_percent([1, 1, 1, 1], [1, 1, 1, 1]), 0.0);
+    }
+
+    #[test]
+    fn menu_bar_text_follows_the_settings() {
+        let all = Config::default();
+        let t = title(
+            &all,
+            12.4,
+            8_000_000_000,
+            16_000_000_000,
+            Some(120_000_000_000),
+            Pressure::Normal,
+        );
+        assert_eq!(t, "CPU 12%  RAM 50%  120 GB free");
+        let t = title(&all, 3.0, 15_000_000_000, 16_000_000_000, None, Pressure::Warning);
+        assert_eq!(t, "CPU 3%  RAM 94% ⚠︎");
+        let none = Config {
+            cpu: false,
+            ram: false,
+            disk: false,
+            interval: 1,
+        };
+        assert_eq!(title(&none, 0.0, 0, 0, None, Pressure::Normal), "MacSweep");
+    }
+}

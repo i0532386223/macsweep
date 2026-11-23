@@ -157,7 +157,7 @@ fn walk(min_bytes: u64, progress: Arc<AtomicUsize>, cancel: Arc<AtomicBool>) -> 
 fn spotlight_last_used(paths: &[PathBuf]) -> Vec<Option<SystemTime>> {
     let mut out = Vec::with_capacity(paths.len());
     for chunk in paths.chunks(100) {
-        let text = std::process::Command::new("mdls")
+        let text = std::process::Command::new("/usr/bin/mdls")
             .args(["-name", "kMDItemLastUsedDate"])
             .args(chunk)
             .output()
