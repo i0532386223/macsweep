@@ -1,0 +1,53 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+		400000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = { LastUpgradeCheck = 1600; };
+			buildConfigurationList = 400000000000000000000002;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			knownRegions = (en, Base);
+			mainGroup = 400000000000000000000003;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (400000000000000000000004 /* MacSweep */);
+		};
+		400000000000000000000002 = { isa = XCConfigurationList; buildConfigurations = (400000000000000000000005); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		400000000000000000000003 = {
+			isa = PBXGroup;
+			children = (
+				400000000000000000000008 /* src */,
+				400000000000000000000009 /* monitor */,
+				40000000000000000000000A /* Cargo.toml */,
+				40000000000000000000000B /* bundle.sh */,
+				40000000000000000000000C /* PROJECT.md */,
+			);
+			sourceTree = "<group>";
+		};
+		400000000000000000000004 /* MacSweep */ = {
+			isa = PBXLegacyTarget;
+			buildArgumentsString = "\"$(SRCROOT)/bundle.sh\"";
+			buildConfigurationList = 400000000000000000000006;
+			buildPhases = ();
+			buildToolPath = /bin/bash;
+			buildWorkingDirectory = "$(SRCROOT)";
+			dependencies = ();
+			name = MacSweep;
+			passBuildSettingsInEnvironment = 1;
+			productName = MacSweep;
+		};
+		400000000000000000000005 = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = macosx; OBJROOT = "$(SRCROOT)/target/xcode/intermediates"; SYMROOT = "$(SRCROOT)/target/xcode/products"; }; name = Release; };
+		400000000000000000000006 = { isa = XCConfigurationList; buildConfigurations = (400000000000000000000007); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		400000000000000000000007 = { isa = XCBuildConfiguration; buildSettings = { DEVELOPMENT_TEAM = 7P3YR8EC6R; MACSWEEP_SIGN_TEAM = "$(DEVELOPMENT_TEAM)"; MACOSX_DEPLOYMENT_TARGET = 12.0; PRODUCT_NAME = MacSweep; }; name = Release; };
+		400000000000000000000008 = { isa = PBXFileReference; lastKnownFileType = folder; path = src; sourceTree = "<group>"; };
+		400000000000000000000009 = { isa = PBXFileReference; lastKnownFileType = folder; path = monitor; sourceTree = "<group>"; };
+		40000000000000000000000A = { isa = PBXFileReference; lastKnownFileType = text; path = Cargo.toml; sourceTree = "<group>"; };
+		40000000000000000000000B = { isa = PBXFileReference; lastKnownFileType = text.script.sh; path = bundle.sh; sourceTree = "<group>"; };
+		40000000000000000000000C = { isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = PROJECT.md; sourceTree = "<group>"; };
+	};
+	rootObject = 400000000000000000000001;
+}

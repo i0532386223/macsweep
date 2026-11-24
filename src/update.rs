@@ -9,7 +9,7 @@
 //! `~/Library/Application Support/MacSweep/no-update-check`
 use crate::fsutil;
 
-const LATEST: &str = "https://api.github.com/repos/nihal4/macsweep/releases/latest";
+const LATEST: &str = "https://api.github.com/repos/i0532386223/macsweep/releases/latest";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Release {
@@ -46,7 +46,7 @@ pub fn parse(json: &str) -> Option<Release> {
     let tag = v.get("tag_name")?.as_str()?;
     let url = v.get("html_url")?.as_str()?;
     // Only ever open our own release pages.
-    if !url.starts_with("https://github.com/nihal4/macsweep/releases/") {
+    if !url.starts_with("https://github.com/i0532386223/macsweep/releases/") {
         return None;
     }
     parse_version(tag)?;
@@ -110,13 +110,13 @@ mod tests {
     #[test]
     fn reads_githubs_latest_release() {
         // Shaped like GitHub's real answer for this repository.
-        let json = r#"{"tag_name":"v0.4.0","html_url":"https://github.com/nihal4/macsweep/releases/tag/v0.4.0",
+        let json = r#"{"tag_name":"v0.4.0","html_url":"https://github.com/i0532386223/macsweep/releases/tag/v0.4.0",
                        "draft":false,"prerelease":false,"assets":[{"name":"MacSweep-0.4.0.zip"}]}"#;
         assert_eq!(
             parse(json),
             Some(Release {
                 version: "0.4.0".into(),
-                url: "https://github.com/nihal4/macsweep/releases/tag/v0.4.0".into()
+                url: "https://github.com/i0532386223/macsweep/releases/tag/v0.4.0".into()
             })
         );
     }
@@ -125,7 +125,7 @@ mod tests {
     fn ignores_anything_odd() {
         let other_site = r#"{"tag_name":"v9.0.0","html_url":"https://evil.example/x","draft":false,"prerelease":false}"#;
         assert_eq!(parse(other_site), None);
-        let pre = r#"{"tag_name":"v0.4.0","html_url":"https://github.com/nihal4/macsweep/releases/tag/v0.4.0","draft":false,"prerelease":true}"#;
+        let pre = r#"{"tag_name":"v0.4.0","html_url":"https://github.com/i0532386223/macsweep/releases/tag/v0.4.0","draft":false,"prerelease":true}"#;
         assert_eq!(parse(pre), None);
         assert_eq!(parse(r#"{"message":"API rate limit exceeded"}"#), None);
         assert_eq!(parse("not json"), None);

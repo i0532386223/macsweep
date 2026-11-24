@@ -8,7 +8,7 @@ use crate::theme::{self, Palette, icon};
 use eframe::egui::{self, Color32, Layout, Ui};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
+use std::fs::Metadata;
 use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -90,6 +90,7 @@ pub struct DupFile {
 }
 
 pub struct DupGroup {
+    digest: blake3::Hash,
     size: u64,
     kind: Kind,
     files: Vec<DupFile>,
@@ -221,29 +222,54 @@ fn list_files(roots: &[PathBuf], min_bytes: u64, progress: &AtomicUsize, cancel:
     out
 }
 
-fn hash_edges(path: &Path, size: u64) -> Option<blake3::Hash> {
-    let mut f = File::open(path).ok()?;
-    let mut h = blake3::Hasher::new();
-    let mut buf = vec![0u8; EDGE as usize];
-    let n = f.read(&mut buf).ok()?;
-    h.update(&buf[..n]);
-    if size > 2 * EDGE {
-        f.seek(SeekFrom::End(-(EDGE as i64))).ok()?;
-        let n = f.read(&mut buf).ok()?;
-        h.update(&buf[..n]);
-    }
-    Some(h.finalize())
+fn hash_edges(path: &Path) -> Option<blake3::Hash> {
+    let mut file = crate::safe_fs::open_regular(path).ok()?;
+    let mut hash = blake3::Hasher::new();
+    let mut buf = vec![0; EDGE as usize];
+    file.read_exact(&mut buf).ok()?;
+    hash.update(&buf);
+    file.seek(SeekFrom::End(-(EDGE as i64))).ok()?;
+    file.read_exact(&mut buf).ok()?;
+    hash.update(&buf);
+    Some(hash.finalize())
 }
 
-fn hash_full(path: &Path) -> Option<blake3::Hash> {
-    let f = File::open(path).ok()?;
-    let mut h = blake3::Hasher::new();
-    h.update_reader(f).ok()?;
-    Some(h.finalize())
+#[derive(Clone, PartialEq, Eq)]
+struct FileState {
+    identity: (u64, u64),
+    size: u64,
+    modified: SystemTime,
+    changed: (i64, i64),
+}
+
+impl FileState {
+    fn of(md: Metadata) -> Option<Self> {
+        Some(Self {
+            identity: (md.dev(), md.ino()),
+            size: md.len(),
+            modified: md.modified().ok()?,
+            changed: (md.ctime(), md.ctime_nsec()),
+        })
+    }
+    fn current(path: &Path) -> Option<Self> {
+        Self::of(crate::safe_fs::open_regular(path).ok()?.metadata().ok()?)
+    }
+}
+
+fn hash_full(path: &Path) -> Option<(blake3::Hash, FileState)> {
+    let mut file = crate::safe_fs::open_regular(path).ok()?;
+    let state = FileState::of(file.metadata().ok()?)?;
+    let mut hash = blake3::Hasher::new();
+    hash.update_reader(&mut file).ok()?;
+    (FileState::of(file.metadata().ok()?)? == state).then(|| (hash.finalize(), state))
 }
 
 /// Splits a group into sub-groups whose members share the same hash.
-fn regroup(group: Vec<Entry>, progress: &AtomicUsize, hash: impl Fn(&Entry) -> Option<blake3::Hash> + Sync) -> Vec<Vec<Entry>> {
+fn regroup(
+    group: Vec<Entry>,
+    progress: &AtomicUsize,
+    hash: impl Fn(&Entry) -> Option<blake3::Hash> + Sync,
+) -> Vec<(blake3::Hash, Vec<Entry>)> {
     let hashed: Vec<(Entry, blake3::Hash)> = group
         .into_par_iter()
         .filter_map(|e| {
@@ -255,7 +281,7 @@ fn regroup(group: Vec<Entry>, progress: &AtomicUsize, hash: impl Fn(&Entry) -> O
     for (e, h) in hashed {
         by_hash.entry(h).or_default().push(e);
     }
-    by_hash.into_values().filter(|v| v.len() >= 2).collect()
+    by_hash.into_iter().filter(|(_, files)| files.len() >= 2).collect()
 }
 
 fn find_duplicates(
@@ -281,31 +307,29 @@ fn find_duplicates(
     // Pass 2: same first/last 16 KB. Pass 3: same full content.
     stage.store(1, Ordering::Relaxed);
     progress.store(0, Ordering::Relaxed);
-    let groups: Vec<Vec<Entry>> = candidates
+    let groups: Vec<_> = candidates
         .into_par_iter()
         .flat_map(|g| {
             if cancel.load(Ordering::Relaxed) {
                 return Vec::new();
             }
-            let size = g[0].size;
-            regroup(g, progress, |e| hash_edges(&e.path, size))
+            let full = |e: &Entry| hash_full(&e.path).map(|(digest, _)| digest);
+            if g[0].size <= 2 * EDGE {
+                return regroup(g, progress, full);
+            }
+            regroup(g, progress, |e| hash_edges(&e.path))
                 .into_iter()
-                .flat_map(|g| {
-                    if size <= 2 * EDGE {
-                        vec![g]
-                    } else {
-                        regroup(g, progress, |e| hash_full(&e.path))
-                    }
-                })
-                .collect::<Vec<_>>()
+                .flat_map(|(_, group)| regroup(group, progress, full))
+                .collect()
         })
         .collect();
 
     let mut out: Vec<DupGroup> = groups
         .into_iter()
-        .map(|mut g| {
+        .map(|(digest, mut g)| {
             g.sort_by(|a, b| a.modified.cmp(&b.modified).then_with(|| a.path.cmp(&b.path)));
             DupGroup {
+                digest,
                 size: g[0].size,
                 kind: Kind::of(&g[0].path),
                 files: g
@@ -323,44 +347,87 @@ fn find_duplicates(
     out
 }
 
-/// Moves the selected copies to the Trash after re-checking that each one is
-/// unchanged since the scan and that at least one copy in its group remains.
-fn remove(plan: Vec<(u64, Vec<(PathBuf, Option<SystemTime>)>, Vec<PathBuf>)>) -> (usize, u64, Option<String>) {
-    let mut paths = Vec::new();
-    let mut sizes = Vec::new();
-    let mut skipped = 0;
-    for (size, to_remove, kept) in plan {
-        let keeper_ok = kept
-            .iter()
-            .any(|k| std::fs::metadata(k).map(|m| m.len() == size).unwrap_or(false));
-        if !keeper_ok {
-            skipped += to_remove.len();
-            continue;
+struct RemovalGroup {
+    size: u64,
+    digest: blake3::Hash,
+    selected: Vec<(PathBuf, Option<SystemTime>)>,
+    keep: Vec<PathBuf>,
+}
+
+impl RemovalGroup {
+    fn from_group(group: &DupGroup) -> Self {
+        Self {
+            size: group.size,
+            digest: group.digest,
+            selected: group
+                .files
+                .iter()
+                .filter(|f| f.remove)
+                .map(|f| (f.path.clone(), f.modified))
+                .collect(),
+            keep: group.files.iter().filter(|f| !f.remove).map(|f| f.path.clone()).collect(),
         }
-        for (p, modified) in to_remove {
-            match std::fs::metadata(&p) {
-                Ok(m) if m.len() == size && m.modified().ok() == modified => {
-                    sizes.push(size);
-                    paths.push(p);
-                }
-                _ => skipped += 1,
+    }
+
+    /// Read every byte again. Recheck file identities after the last slow read.
+    fn verified_paths(&self) -> Vec<PathBuf> {
+        let candidates: Vec<_> = self
+            .selected
+            .iter()
+            .filter_map(|(path, modified)| {
+                let (hash, state) = hash_full(path)?;
+                (hash == self.digest && state.size == self.size && Some(state.modified) == *modified).then_some((path, state))
+            })
+            .collect();
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+        for path in &self.keep {
+            let Some((hash, keeper)) = hash_full(path) else { continue };
+            if hash != self.digest || keeper.size != self.size {
+                continue;
+            }
+            let verified = candidates
+                .iter()
+                .filter(|(p, state)| state.identity != keeper.identity && FileState::current(p).as_ref() == Some(state))
+                .map(|(p, _)| (*p).clone())
+                .collect();
+            if FileState::current(path).as_ref() == Some(&keeper) {
+                return verified;
             }
         }
+        Vec::new()
     }
-    let mut err = fsutil::move_to_trash(&paths).err();
-    // Count only what is really gone.
-    let gone: Vec<u64> = paths
-        .iter()
-        .zip(&sizes)
-        .filter(|(p, _)| !fsutil::lexists(p))
-        .map(|(_, s)| *s)
-        .collect();
-    let n = gone.len();
-    let freed: u64 = gone.iter().sum();
-    if skipped > 0 && err.is_none() {
-        err = Some(format!("{skipped} file(s) changed since the scan and were left alone."));
+}
+
+/// Check and move one group at a time. A changed group never authorizes another group.
+fn remove(plan: Vec<RemovalGroup>) -> (usize, u64, Option<String>) {
+    let (mut removed, mut bytes, mut skipped) = (0, 0, 0);
+    let mut errors = Vec::new();
+    crate::safety_log::event(
+        false,
+        &format!("Checking full file contents in {} duplicate groups", plan.len()),
+    );
+    for group in plan {
+        let paths = group.verified_paths();
+        skipped += group.selected.len() - paths.len();
+        if let Err(error) = fsutil::move_to_trash(&paths) {
+            errors.push(error);
+        }
+        let gone = paths
+            .iter()
+            .filter(|p| matches!(std::fs::symlink_metadata(p), Err(e) if e.kind() == std::io::ErrorKind::NotFound))
+            .count();
+        removed += gone;
+        bytes += group.size * gone as u64;
     }
-    (n, freed, err)
+    if skipped > 0 {
+        crate::safety_log::event(true, &format!("Skipped {skipped} duplicate candidates after verification"));
+        errors.push(format!(
+            "Could not verify {skipped} file(s) and their kept copies. They were left in place."
+        ));
+    }
+    (removed, bytes, (!errors.is_empty()).then(|| errors.join("\n")))
 }
 
 // ---------- UI ----------
@@ -632,16 +699,7 @@ impl Dupes {
                                     .groups
                                     .iter()
                                     .filter(|g| g.files.iter().any(|f| f.remove))
-                                    .map(|g| {
-                                        let rm = g
-                                            .files
-                                            .iter()
-                                            .filter(|f| f.remove)
-                                            .map(|f| (f.path.clone(), f.modified))
-                                            .collect();
-                                        let kept = g.files.iter().filter(|f| !f.remove).map(|f| f.path.clone()).collect();
-                                        (g.size, rm, kept)
-                                    })
+                                    .map(RemovalGroup::from_group)
                                     .collect();
                                 self.trash = Some(Job::spawn(ctx, move |_, _| remove(plan)));
                             }
@@ -812,7 +870,10 @@ mod tests {
     use std::fs;
 
     fn tmp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("macsweep-dupes-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("macsweep-dupes-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
@@ -860,6 +921,36 @@ mod tests {
         write(&d.join("x/a.bin"), &a);
         write(&d.join("y/b.bin"), &b);
         assert!(scan(&d, 1).is_empty());
+    }
+
+    #[test]
+    fn compares_the_tail_of_medium_files() {
+        let d = tmp("tail");
+        let a = noise(24 * 1024, 3);
+        let mut b = a.clone();
+        *b.last_mut().unwrap() ^= 1;
+        write(&d.join("first"), &a);
+        write(&d.join("second"), &b);
+        assert!(scan(&d, 1).is_empty());
+    }
+
+    #[test]
+    fn cleanup_requires_a_keeper_with_the_original_contents() {
+        let d = tmp("verify-keeper");
+        let data = noise(40_000, 1);
+        write(&d.join("copy"), &data);
+        write(&d.join("keeper"), &data);
+        let mut groups = scan(&d, 1);
+        assert_eq!(groups.len(), 1);
+        let group = &mut groups[0];
+        group.files.iter_mut().find(|f| f.path == d.join("copy")).unwrap().remove = true;
+        let plan = RemovalGroup::from_group(group);
+        assert_eq!(plan.verified_paths(), vec![d.join("copy")]);
+        write(&d.join("keeper"), &noise(data.len(), 2));
+        let (removed, bytes, warning) = remove(vec![plan]);
+        assert_eq!((removed, bytes), (0, 0));
+        assert!(warning.is_some());
+        assert_eq!(fs::read(d.join("copy")).unwrap(), data);
     }
 
     #[test]
@@ -925,11 +1016,12 @@ mod tests {
     fn removal_is_refused_when_the_kept_copy_is_gone() {
         let d = tmp("keeper");
         write(&d.join("dup.bin"), &noise(10_000, 7));
-        let plan = vec![(
-            10_000,
-            vec![(d.join("dup.bin"), fs::metadata(d.join("dup.bin")).unwrap().modified().ok())],
-            vec![d.join("missing.bin")],
-        )];
+        let plan = vec![RemovalGroup {
+            size: 10_000,
+            digest: blake3::hash(&noise(10_000, 7)),
+            selected: vec![(d.join("dup.bin"), fs::metadata(d.join("dup.bin")).unwrap().modified().ok())],
+            keep: vec![d.join("missing.bin")],
+        }];
         let (n, freed, err) = remove(plan);
         assert_eq!((n, freed), (0, 0));
         assert!(err.is_some());
@@ -942,7 +1034,12 @@ mod tests {
         write(&d.join("keep.bin"), &noise(10_000, 8));
         write(&d.join("dup.bin"), &noise(10_000, 8));
         let old = Some(SystemTime::UNIX_EPOCH); // pretend the scan saw an older version
-        let plan = vec![(10_000, vec![(d.join("dup.bin"), old)], vec![d.join("keep.bin")])];
+        let plan = vec![RemovalGroup {
+            size: 10_000,
+            digest: blake3::hash(&noise(10_000, 8)),
+            selected: vec![(d.join("dup.bin"), old)],
+            keep: vec![d.join("keep.bin")],
+        }];
         let (n, _, err) = remove(plan);
         assert_eq!(n, 0);
         assert!(err.is_some());

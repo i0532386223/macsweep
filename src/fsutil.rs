@@ -1,4 +1,5 @@
 //! File-system helpers shared by every feature.
+use crate::{safe_fs, safety_log};
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -197,89 +198,101 @@ pub fn is_protected(p: &Path) -> bool {
     PROTECTED_NAMES.contains(&n.as_str()) || PROTECTED_WORDS.iter().any(|w| n.contains(w))
 }
 
-/// Final gate before any permanent delete: the item must sit *inside* one of
-/// the JUNK_ROOTS (never the root itself) and must not be protected.
-pub fn deletable(p: &Path) -> bool {
-    let h = home();
-    if h.as_os_str().is_empty() || p.components().any(|c| c == std::path::Component::ParentDir) {
-        return false;
-    }
-    JUNK_ROOTS.iter().any(|r| {
-        let root = h.join(r);
-        let inside = p.starts_with(&root) && p != root;
-        // Things in the Trash were already thrown away by you, so names don't matter there.
-        inside && (*r == ".Trash" || !is_protected(p))
-    })
+/// Only immediate children of a configured root can be selected by System Junk.
+fn junk_location(home: &Path, path: &Path) -> bool {
+    home.is_absolute()
+        && home != Path::new("/")
+        && JUNK_ROOTS
+            .iter()
+            .any(|r| path.parent() == Some(home.join(r).as_path()) && (*r == ".Trash" || !is_protected(path)))
 }
 
-/// Permanently deletes junk items — refuses anything that isn't `deletable`.
+pub fn junk_children(home: &Path, root: &str) -> Vec<PathBuf> {
+    if !home.is_absolute() || !JUNK_ROOTS.contains(&root) {
+        return Vec::new();
+    }
+    let path = home.join(root);
+    match safe_fs::open_dir(&path).and_then(|dir| safe_fs::names(&dir)) {
+        Ok(names) => names
+            .into_iter()
+            .map(|n| path.join(n))
+            .filter(|p| junk_location(home, p))
+            .collect(),
+        Err(e) => {
+            if e != rustix::io::Errno::NOENT {
+                safety_log::event(true, &format!("Skipped a cleanup root during directory inspection ({e})"));
+            }
+            Vec::new()
+        }
+    }
+}
+
+fn delete_junk(home: &Path, path: &Path) -> rustix::io::Result<()> {
+    if !junk_location(home, path) {
+        return Err(rustix::io::Errno::PERM);
+    }
+    safe_fs::remove(path, path.parent() == Some(home.join(".Trash").as_path()))
+}
+
 pub fn delete_permanently(items: &[(PathBuf, u64)]) -> (u64, usize) {
+    let home = home();
     let (mut freed, mut failed) = (0u64, 0usize);
-    for (p, size) in items {
-        if !deletable(p) {
-            failed += 1;
-            continue;
-        }
-        let mut res = remove_any(p);
-        if res.is_err() && p.starts_with(trash_dir()) {
-            res = unlock_and_remove(p);
-        }
-        match res {
+    safety_log::event(
+        false,
+        &format!("Checking the locations of {} selected junk items", items.len()),
+    );
+    for (path, size) in items {
+        match delete_junk(&home, path) {
             Ok(()) => freed += size,
-            Err(_) => failed += 1,
+            Err(e) => {
+                safety_log::event(true, &format!("Skipped a junk item during removal ({e})"));
+                failed += 1;
+            }
         }
     }
     bump();
     (freed, failed)
 }
 
-/// Moves items to the Trash.
-///
-/// Each item goes through Finder first, so "Put Back" works. Items Finder
-/// refuses (usually apps installed by a .pkg and owned by the system) are
-/// retried once with the standard macOS administrator password prompt.
-/// Returns Err with a readable message if anything is still left.
+/// Finder handles ordinary items, including its native permission prompts.
+/// A refusal leaves the item in place. No shell or elevated retry is needed.
 pub fn move_to_trash(paths: &[PathBuf]) -> Result<(), String> {
+    move_to_trash_with(paths, &trash_dir(), |items| trash::delete_all(items).is_ok())
+}
+
+fn move_to_trash_with(paths: &[PathBuf], destination: &Path, finder: impl Fn(&[&PathBuf]) -> bool) -> Result<(), String> {
     if paths.is_empty() {
         return Ok(());
     }
-    let tdir = trash_dir();
-    let mut refused = Vec::new();
-    let (links, items): (Vec<PathBuf>, Vec<PathBuf>) = paths.iter().filter(|p| lexists(p)).cloned().partition(|p| is_symlink(p));
-    // A link (e.g. a leftover shortcut in /Applications) is moved itself;
-    // Finder would try to follow it to its target.
-    for l in links {
-        if move_into(&l, &tdir).is_err() && lexists(&l) {
-            refused.push(l);
+    safety_log::event(false, &format!("Moving {} selected items to the Trash", paths.len()));
+    let (links, items): (Vec<_>, Vec<_>) = paths.iter().filter(|p| lexists(p)).partition(|p| is_symlink(p));
+    for link in links {
+        if let Err(e) = move_into(link, destination) {
+            safety_log::event(true, &format!("Could not move a link to the Trash ({e})"));
         }
     }
-    // Finder plays its sound once per request, so send items in batches.
     for chunk in items.chunks(200) {
-        if trash::delete_all(chunk).is_err() {
-            // Find which items Finder refused, one at a time.
-            for p in chunk.iter().filter(|p| lexists(p)) {
-                if trash::delete(p).is_err() && lexists(p) {
-                    refused.push(p.clone());
+        if !finder(chunk) {
+            for path in chunk.iter().filter(|p| lexists(p)) {
+                if !finder(std::slice::from_ref(path)) {
+                    safety_log::event(true, "Finder refused a selected item");
                 }
             }
         }
     }
-    let mut cancelled = false;
-    if !refused.is_empty() {
-        cancelled = !trash_with_admin(&refused);
-    }
     bump();
-    let left: Vec<String> = paths
+    let left: Vec<_> = paths
         .iter()
-        .filter(|p| lexists(p))
-        .map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+        .filter(|p| !matches!(fs::symlink_metadata(p), Err(e) if e.kind() == std::io::ErrorKind::NotFound))
+        .map(|p| pretty(p))
         .collect();
     if left.is_empty() {
         Ok(())
-    } else if cancelled {
-        Err(format!("Cancelled. {} was not removed.", left.join(", ")))
     } else {
-        Err(format!("Couldn't remove {}. macOS denied permission.", left.join(", ")))
+        Err(format!(
+            "Could not confirm removal of {}. Review these items in Finder.",
+            left.join(", ")
+        ))
     }
 }
 
@@ -299,70 +312,26 @@ pub fn is_broken_link(p: &Path) -> bool {
 
 /// Moves an item into `dir`, adding a number if the name is taken.
 pub fn move_into(p: &Path, dir: &Path) -> std::io::Result<PathBuf> {
-    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut dest = dir.join(&name);
-    let mut i = 2;
-    while lexists(&dest) {
-        dest = dir.join(format!("{name} {i}"));
-        i += 1;
+    use rustix::fs::{RenameFlags, renameat_with};
+    let (source_dir, name) = safe_fs::parent(p)?;
+    let dest_dir = safe_fs::open_dir(dir)?;
+    let mut candidate = name.to_owned();
+    for index in 2.. {
+        match renameat_with(&source_dir, name, &dest_dir, &candidate, RenameFlags::NOREPLACE) {
+            Ok(()) => return Ok(dir.join(candidate)),
+            Err(rustix::io::Errno::EXIST) => {
+                candidate = name.to_owned();
+                candidate.push(format!(" {index}"));
+            }
+            Err(e) => return Err(e.into()),
+        }
     }
-    fs::rename(p, &dest)?;
-    Ok(dest)
+    Err(std::io::Error::other("No available name in the Trash"))
 }
 
 /// Single-quotes a string for /bin/sh.
 pub fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
-}
-
-/// Builds the shell script that moves items into the user's Trash and gives
-/// them back to the user, so the Trash can be emptied without a password.
-pub fn admin_trash_script(paths: &[PathBuf], trash_dir: &Path, user: &str, stamp: u64) -> String {
-    // Two items with the same name must not land on the same spot: `mv` would
-    // put the second one *inside* the first.
-    let mut used = std::collections::HashSet::new();
-    paths
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let mut dest = trash_dir.join(&name);
-            if lexists(&dest) || used.contains(&dest) {
-                dest = trash_dir.join(format!("{name} {stamp}-{i}"));
-            }
-            used.insert(dest.clone());
-            format!(
-                "/bin/mv {src} {dst} && /usr/sbin/chown -hR {u} {dst}",
-                src = sh_quote(&p.to_string_lossy()),
-                dst = sh_quote(&dest.to_string_lossy()),
-                u = sh_quote(user),
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ")
-}
-
-/// Runs the move with administrator rights (macOS shows its password prompt).
-/// Returns false if the user cancelled the prompt.
-fn trash_with_admin(paths: &[PathBuf]) -> bool {
-    let user = std::env::var("USER").unwrap_or_default();
-    if user.is_empty() {
-        return true;
-    }
-    let stamp = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let script = admin_trash_script(paths, &trash_dir(), &user, stamp);
-    let applescript = format!(
-        "do shell script \"{}\" with administrator privileges with prompt \"MacSweep needs your password to move these items to the Trash.\"",
-        script.replace('\\', "\\\\").replace('"', "\\\"")
-    );
-    match Command::new("/usr/bin/osascript").args(["-e", &applescript]).output() {
-        // -128 is "User canceled" in AppleScript.
-        Ok(o) => !String::from_utf8_lossy(&o.stderr).contains("-128"),
-        Err(_) => true,
-    }
 }
 
 pub fn trash_dir() -> PathBuf {
@@ -399,30 +368,29 @@ pub fn trash_size() -> u64 {
     trash_dirs().iter().map(|d| size_of(d)).sum()
 }
 
-fn remove_any(p: &Path) -> std::io::Result<()> {
-    match fs::symlink_metadata(p) {
-        Ok(md) if md.is_dir() => fs::remove_dir_all(p),
-        Ok(_) => fs::remove_file(p),
-        Err(e) => Err(e),
-    }
-}
-
-/// Files marked "Locked" in Finder can't be deleted until unlocked.
-fn unlock_and_remove(p: &Path) -> std::io::Result<()> {
-    let _ = Command::new("/usr/bin/chflags").arg("-R").arg("nouchg").arg(p).status();
-    remove_any(p)
-}
-
-/// Permanently deletes everything in every Trash. Returns (freed, failed).
+/// Permanently deletes the contents of the user's Trash on each volume.
 pub fn empty_trash() -> (u64, usize) {
     let (mut freed, mut failed) = (0u64, 0usize);
-    for dir in trash_dirs() {
-        for p in children(&dir) {
-            let size = size_of(&p);
-            if remove_any(&p).is_err() && unlock_and_remove(&p).is_err() && lexists(&p) {
+    safety_log::event(false, "Opening the Trash directories before removal");
+    for path in trash_dirs() {
+        let result = safe_fs::open_dir(&path).and_then(|dir| Ok((safe_fs::names(&dir)?, dir)));
+        match result {
+            Ok((names, dir)) => {
+                for name in names {
+                    let size = size_of(&path.join(&name));
+                    match safe_fs::remove_at(&dir, &name, true) {
+                        Ok(()) => freed += size,
+                        Err(e) => {
+                            safety_log::event(true, &format!("Could not empty a Trash item ({e})"));
+                            failed += 1;
+                        }
+                    }
+                }
+            }
+            Err(rustix::io::Errno::NOENT) => {}
+            Err(e) => {
+                safety_log::event(true, &format!("Could not open a Trash directory ({e})"));
                 failed += 1;
-            } else {
-                freed += size;
             }
         }
     }
@@ -531,19 +499,8 @@ mod tests {
             "Documents/thesis.docx",
             "Library/Caches/../Application Support/Google",
         ] {
-            assert!(!deletable(&h.join(p)), "{p} must be protected");
+            assert!(!junk_location(&h, &h.join(p)), "{p} must be protected");
         }
-    }
-
-    #[test]
-    fn admin_script_quotes_awkward_names() {
-        let t = PathBuf::from("/Users/me/.Trash");
-        let p = PathBuf::from("/Applications/Bob's \"Tool\" 1.0.app");
-        let s = admin_trash_script(&[p], &t, "me", 7);
-        assert_eq!(
-            s,
-            "/bin/mv '/Applications/Bob'\\''s \"Tool\" 1.0.app' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app' && /usr/sbin/chown -hR 'me' '/Users/me/.Trash/Bob'\\''s \"Tool\" 1.0.app'"
-        );
     }
 
     #[test]
@@ -555,18 +512,68 @@ mod tests {
     }
 
     #[test]
-    fn same_named_items_get_different_trash_names() {
-        let t = PathBuf::from("/nonexistent-trash");
-        let a = PathBuf::from("/Applications/Foo.app");
-        let b = PathBuf::from("/Applications/Utilities/Foo.app");
-        let s = admin_trash_script(&[a, b], &t, "me", 7);
-        assert!(s.contains("'/nonexistent-trash/Foo.app'"));
-        assert!(s.contains("'/nonexistent-trash/Foo.app 7-1'"));
+    fn a_refused_trash_request_preserves_the_file_and_its_owner() {
+        let base = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("macsweep-denied-{}", std::process::id()));
+        fs::create_dir_all(base.join("trash")).unwrap();
+        let file = base.join("keep");
+        fs::write(&file, b"original").unwrap();
+        let uid = fs::metadata(&file).unwrap().uid();
+        let error = move_to_trash_with(std::slice::from_ref(&file), &base.join("trash"), |_| false).unwrap_err();
+        assert!(error.contains("Finder"));
+        assert_eq!(fs::metadata(&file).unwrap().uid(), uid);
+        assert_eq!(fs::read(file).unwrap(), b"original");
+        assert_eq!(fs::read_dir(base.join("trash")).unwrap().count(), 0);
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn moving_a_link_preserves_existing_trash_items() {
+        let base = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("macsweep-trash-name-{}", std::process::id()));
+        let trash = base.join("trash");
+        fs::create_dir_all(&trash).unwrap();
+        let link = base.join("shortcut");
+        std::os::unix::fs::symlink("missing", &link).unwrap();
+        fs::write(trash.join("shortcut"), b"already here").unwrap();
+        assert_eq!(move_into(&link, &trash).unwrap(), trash.join("shortcut 2"));
+        assert_eq!(fs::read(trash.join("shortcut")).unwrap(), b"already here");
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn junk_removal_stays_inside_real_cache_directories() {
+        use std::os::unix::fs::symlink;
+        let base = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("macsweep-junk-safe-{}", std::process::id()));
+        let caches = base.join("Library/Caches");
+        let retained = base.join("Documents");
+        fs::create_dir_all(&retained).unwrap();
+        fs::create_dir_all(caches.join("ordinary/subdir")).unwrap();
+        fs::write(retained.join("notes"), b"keep").unwrap();
+        symlink(&retained, caches.join("ordinary/subdir/link")).unwrap();
+        assert!(junk_children(&base, "Library/Caches").contains(&caches.join("ordinary")));
+        delete_junk(&base, &caches.join("ordinary")).unwrap();
+        fs::remove_dir(&caches).unwrap();
+        symlink(&retained, &caches).unwrap();
+        assert!(junk_children(&base, "Library/Caches").is_empty());
+        assert!(delete_junk(&base, &caches.join("notes")).is_err());
+        assert_eq!(fs::read(retained.join("notes")).unwrap(), b"keep");
+        fs::remove_dir_all(base).unwrap();
     }
 
     #[test]
     fn broken_links_are_detected_and_moved() {
-        let d = std::env::temp_dir().join(format!("macsweep-link-{}", std::process::id()));
+        let d = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("macsweep-link-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(d.join("trash")).unwrap();
         let link = d.join("JDownloader2.app");
@@ -581,17 +588,17 @@ mod tests {
     #[test]
     fn roots_themselves_are_not_deletable() {
         for r in JUNK_ROOTS {
-            assert!(!deletable(&home().join(r)), "{r}");
+            assert!(!junk_location(&home(), &home().join(r)), "{r}");
         }
     }
 
     #[test]
     fn ordinary_cache_items_are_deletable() {
         let h = home();
-        assert!(deletable(&h.join("Library/Caches/com.google.Chrome")));
-        assert!(deletable(&h.join("Library/Caches/Homebrew")));
-        assert!(deletable(&h.join(".Trash/old.dmg")));
-        assert!(deletable(&h.join(".Trash/passwords-backup.txt")));
+        assert!(junk_location(&h, &h.join("Library/Caches/com.google.Chrome")));
+        assert!(junk_location(&h, &h.join("Library/Caches/Homebrew")));
+        assert!(junk_location(&h, &h.join(".Trash/old.dmg")));
+        assert!(junk_location(&h, &h.join(".Trash/passwords-backup.txt")));
     }
 
     #[test]
@@ -603,7 +610,7 @@ mod tests {
             "Library/Caches/com.1password.1password",
             "Library/Caches/com.app.AuthService",
         ] {
-            assert!(!deletable(&h.join(p)), "{p}");
+            assert!(!junk_location(&h, &h.join(p)), "{p}");
         }
     }
 }

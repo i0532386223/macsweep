@@ -7,17 +7,24 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-APP="dist/MacSweep.app"
+# Xcode opens with a minimal PATH. Prefer the explicitly selected compiler if present.
+export PATH="${PATH}:/opt/homebrew/bin:/usr/local/bin:$HOME/.cargo/bin"
+CARGO_BIN="${MACSWEEP_CARGO:-cargo}"
+# Xcode 27 requires its external build driver to target 12+. Cargo links the app.
+export MACOSX_DEPLOYMENT_TARGET="${MACSWEEP_DEPLOYMENT_TARGET:-11.0}"
+mkdir -p dist
+STAGE=$(mktemp -d "$PWD/dist/.bundle.XXXXXXXX")
+trap 'rm -rf "$STAGE"' EXIT
+APP="$STAGE/MacSweep.app"
 # The menu bar monitor is a separate tiny app inside MacSweep.app, started as a
 # login item only if the user turns it on.
 HELPER="$APP/Contents/Library/LoginItems/MacSweep Monitor.app"
-rm -rf dist
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HELPER/Contents/MacOS" "$HELPER/Contents/Resources"
 
 if [[ "${UNIVERSAL:-0}" == "1" ]]; then
     rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
-    cargo build --release --workspace --target aarch64-apple-darwin
-    cargo build --release --workspace --target x86_64-apple-darwin
+    "$CARGO_BIN" build --locked --release --workspace --target aarch64-apple-darwin
+    "$CARGO_BIN" build --locked --release --workspace --target x86_64-apple-darwin
     lipo -create -output "$APP/Contents/MacOS/MacSweep" \
         target/aarch64-apple-darwin/release/macsweep \
         target/x86_64-apple-darwin/release/macsweep
@@ -25,7 +32,7 @@ if [[ "${UNIVERSAL:-0}" == "1" ]]; then
         target/aarch64-apple-darwin/release/macsweep-monitor \
         target/x86_64-apple-darwin/release/macsweep-monitor
 else
-    cargo build --release --workspace
+    "$CARGO_BIN" build --locked --release --workspace
     cp target/release/macsweep "$APP/Contents/MacOS/MacSweep"
     cp target/release/macsweep-monitor "$HELPER/Contents/MacOS/macsweep-monitor"
 fi
@@ -38,13 +45,13 @@ cat > "$HELPER/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key><string>MacSweep Monitor</string>
     <key>CFBundleDisplayName</key><string>MacSweep Monitor</string>
-    <key>CFBundleIdentifier</key><string>com.nihal.macsweep.monitor</string>
+    <key>CFBundleIdentifier</key><string>me.i0532386223.macsweep.monitor</string>
     <key>CFBundleExecutable</key><string>macsweep-monitor</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundleVersion</key><string>${VERSION}</string>
-    <key>LSMinimumSystemVersion</key><string>11.0</string>
+    <key>LSMinimumSystemVersion</key><string>${MACOSX_DEPLOYMENT_TARGET}</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
 </dict>
@@ -60,16 +67,16 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
     <key>CFBundleName</key><string>MacSweep</string>
     <key>CFBundleDisplayName</key><string>MacSweep</string>
-    <key>CFBundleIdentifier</key><string>com.nihal.macsweep</string>
+    <key>CFBundleIdentifier</key><string>me.i0532386223.macsweep</string>
     <key>CFBundleExecutable</key><string>MacSweep</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundleVersion</key><string>${VERSION}</string>
-    <key>LSMinimumSystemVersion</key><string>11.0</string>
+    <key>LSMinimumSystemVersion</key><string>${MACOSX_DEPLOYMENT_TARGET}</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSAppleEventsUsageDescription</key><string>MacSweep asks Finder to move items to the Trash and quits apps before uninstalling them.</string>
+    <key>NSAppleEventsUsageDescription</key><string>MacSweep asks Finder to move selected items to the Trash.</string>
 </dict>
 </plist>
 PLIST
@@ -77,20 +84,40 @@ PLIST
 # Sign. With a stable local certificate (scripts/setup-signing.sh) macOS keeps
 # Full Disk Access across rebuilds; otherwise fall back to an ad-hoc signature,
 # which macOS treats as a brand-new app after every build.
-SIGN_ID="-"
-if [[ "${ADHOC:-0}" != "1" ]] && security find-identity -p codesigning 2>/dev/null | grep -q "MacSweep Local Signing"; then
-    SIGN_ID="MacSweep Local Signing"
+SIGN_ID="${MACSWEEP_SIGN_IDENTITY:-}"
+if [[ -z "$SIGN_ID" && -n "${MACSWEEP_SIGN_TEAM:-}" && "${ADHOC:-0}" != "1" ]]; then
+    SIGN_ID=$(security find-identity -v -p codesigning | awk -v team="($MACSWEEP_SIGN_TEAM)" '
+        /"Developer ID Application: / && index($0, team) && !id { id = $2 }
+        END { print id }')
+    if [[ -z "$SIGN_ID" ]]; then
+        echo "A Developer ID Application certificate for team $MACSWEEP_SIGN_TEAM is required." >&2
+        exit 1
+    fi
 fi
-# Inner app first, then the outer one that seals it.
-codesign --force --sign "$SIGN_ID" "$HELPER"
-codesign --force --sign "$SIGN_ID" "$APP"
-if [[ "$SIGN_ID" == "-" ]]; then
-    echo "Note: ad-hoc signed. After installing this build, re-add MacSweep in Full Disk Access"
-    echo "      (or run scripts/setup-signing.sh once so you never have to again)."
+if [[ -n "$SIGN_ID" ]]; then
+    # The inner helper requires no Apple events. Only the host can ask Finder to move an item.
+    codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$HELPER"
+    codesign --force --options runtime --timestamp --entitlements signing/MacSweep.entitlements --sign "$SIGN_ID" "$APP"
 else
-    echo "Signed with '$SIGN_ID' — Full Disk Access carries over."
+    SIGN_ID="-"
+    if [[ "${ADHOC:-0}" != "1" ]] && security find-identity -p codesigning 2>/dev/null | grep -q "MacSweep Local Signing"; then
+        SIGN_ID="MacSweep Local Signing"
+    fi
+    codesign --force --sign "$SIGN_ID" "$HELPER"
+    codesign --force --sign "$SIGN_ID" "$APP"
 fi
-echo "Built $APP v${VERSION} ($(du -sh "$APP" | cut -f1))"
+codesign --verify --strict "$HELPER"
+codesign --verify --deep --strict "$APP"
+
+# Replace only the previous application after the new signatures pass verification.
+if [[ -e dist/MacSweep.app ]]; then
+    mv dist/MacSweep.app "$STAGE/previous.app"
+fi
+if ! mv "$APP" dist/MacSweep.app; then
+    if [[ -d "$STAGE/previous.app" ]]; then mv "$STAGE/previous.app" dist/MacSweep.app; fi
+    exit 1
+fi
+echo "Built dist/MacSweep.app v${VERSION}. Signing identity: $SIGN_ID"
 
 if [[ "${ZIP:-0}" == "1" ]]; then
     (cd dist && ditto -c -k --keepParent MacSweep.app "MacSweep-${VERSION}.zip")
