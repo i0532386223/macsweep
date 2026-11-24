@@ -2,6 +2,7 @@
 use crate::fsutil::{self, fmt_size};
 use crate::job::{self, Job};
 use crate::junk::{busy_screen, done_screen};
+use crate::running_app::quit_bundles;
 use crate::theme::{self, Palette, icon};
 use eframe::egui::{self, Color32, ColorImage, Layout, TextureHandle, TextureOptions, Ui};
 use rayon::prelude::*;
@@ -42,8 +43,8 @@ pub struct AppInfo {
     icon_file: Option<String>,
     /// The .app bundle the icon and metadata come from (the main app of a package).
     icon_app: PathBuf,
-    /// Bundle IDs to quit before removal (every app inside a package).
-    members: Vec<String>,
+    /// Actual bundles to quit before removal, including the apps inside a package.
+    members: Vec<PathBuf>,
     /// Number of apps inside, when this entry is an install folder.
     package_apps: usize,
     /// A shortcut whose app no longer exists.
@@ -152,7 +153,7 @@ const LIB_DIRS: [(&str, &str, bool); 13] = [
 ];
 
 /// System-wide folders (in /Library, for all users). Items here are matched
-/// by bundle ID only, and removing them asks for your password.
+/// by bundle ID only. Finder controls permission to move them.
 const SYS_DIRS: [(&str, &str, bool); 7] = [
     ("Application Support", "App Support · all users", true),
     ("Caches", "Cache · all users", false),
@@ -363,10 +364,7 @@ fn find_apps() -> Vec<AppInfo> {
             .to_string_lossy()
             .into_owned();
             let main_name = main.file_stem()?.to_string_lossy().into_owned();
-            let members: Vec<String> = match &package {
-                Some(inner) => inner.iter().filter_map(|a| read_bundle(a).id).collect(),
-                None => b.id.iter().cloned().collect(),
-            };
+            let members = package.clone().unwrap_or_else(|| vec![main.to_path_buf()]);
 
             // Leftovers: match the main app's bundle ID or exact name (and the folder name).
             let mut names = vec![main_name.to_lowercase(), main_name.to_lowercase().replace(' ', "")];
@@ -556,29 +554,15 @@ fn last_opened(app: &Path) -> String {
     }
 }
 
-fn osascript(script: &str) -> String {
-    Command::new("/usr/bin/osascript")
-        .args(["-e", script])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
-}
-
 /// Quits each app if running, then moves app + selected leftovers to the Trash.
 fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
     let mut paths = Vec::new();
-    let mut still_running = Vec::new();
-    'apps: for a in &apps {
-        for bid in &a.members {
-            let running = format!("application id \"{bid}\" is running");
-            if osascript(&running) == "true" {
-                osascript(&format!("tell application id \"{bid}\" to quit"));
-                std::thread::sleep(std::time::Duration::from_millis(1500));
-                if osascript(&running) == "true" {
-                    still_running.push(a.name.clone());
-                    continue 'apps;
-                }
-            }
+    let mut refused = Vec::new();
+    for a in &apps {
+        if let Err(reason) = quit_bundles(&a.members) {
+            crate::safety_log::event(true, "Skipped an uninstall after the running application check");
+            refused.push(format!("{}: {reason}", a.name));
+            continue;
         }
         paths.push(a.path.clone());
         paths.extend(a.leftovers.iter().filter(|l| l.selected).map(|l| l.path.clone()));
@@ -610,11 +594,9 @@ fn uninstall(apps: Vec<AppInfo>) -> (usize, u64, Option<String>) {
                     .sum::<u64>()
         })
         .sum();
-    if !still_running.is_empty() {
-        err = Some(format!(
-            "{} is still running — quit it and try again.",
-            still_running.join(", ")
-        ));
+    if !refused.is_empty() {
+        refused.extend(err);
+        err = Some(refused.join("\n"));
     }
     (n, freed, err)
 }

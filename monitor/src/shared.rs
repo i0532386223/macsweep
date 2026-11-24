@@ -3,9 +3,9 @@
 //! settings file format.
 
 /// launchd label of the helper's login item.
-pub const LABEL: &str = "com.nihal.macsweep.monitor";
+pub const LABEL: &str = "me.i0532386223.macsweep.monitor";
 /// Darwin notification MacSweep posts after saving new settings.
-pub const RELOAD: &str = "com.nihal.macsweep.monitor.reload";
+pub const RELOAD: &str = "me.i0532386223.macsweep.monitor.reload";
 /// Settings file, relative to the home folder.
 pub const CONF: &str = "Library/Application Support/MacSweep/monitor.conf";
 

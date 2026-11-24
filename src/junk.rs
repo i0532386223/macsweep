@@ -17,12 +17,16 @@ pub struct Item {
 /// Bundle IDs and names of the apps running now (lower case), from
 /// `lsappinfo`, which needs no extra permission.
 pub fn running_apps() -> Vec<String> {
-    let out = std::process::Command::new("/usr/bin/lsappinfo")
-        .arg("list")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default();
-    parse_running(&out)
+    try_running_apps().unwrap_or_default()
+}
+
+pub fn try_running_apps() -> Option<Vec<String>> {
+    let out = std::process::Command::new("/usr/bin/lsappinfo").arg("list").output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let apps = parse_running(&String::from_utf8_lossy(&out.stdout));
+    (!apps.is_empty()).then_some(apps)
 }
 
 fn parse_running(out: &str) -> Vec<String> {
@@ -257,9 +261,8 @@ impl Junk {
                 .map(|rs| {
                     let mut items: Vec<(PathBuf, u64)> = rs
                         .iter()
-                        .flat_map(|r| fsutil::children(&home.join(r)))
+                        .flat_map(|r| fsutil::junk_children(&home, r))
                         .filter(|p| p.file_name().is_some_and(|n| n != ".DS_Store"))
-                        .filter(|p| fsutil::deletable(p))
                         .collect::<Vec<_>>()
                         .into_par_iter()
                         .map(|p| {

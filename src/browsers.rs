@@ -334,7 +334,7 @@ fn profile_names(data: &Path) -> HashMap<String, String> {
 fn profile_dirs(data: &Path) -> Vec<String> {
     let mut v: Vec<String> = fsutil::children(data)
         .into_iter()
-        .filter(|p| p.join("Preferences").is_file())
+        .filter(|p| crate::safe_fs::open_dir(p).is_ok() && p.join("Preferences").is_file())
         .map(|p| name_of(&p))
         .filter(|n| !HIDDEN_PROFILES.contains(&n.as_str()))
         .collect();
@@ -572,6 +572,7 @@ fn scan_browser(
     for (d, l) in dirs.iter().zip(&labels) {
         items.extend(scan_profile(&data, &cache, d, l));
     }
+    items.retain(|item| item.paths.iter().all(|p| allowed(&data, &cache, p)));
     items.sort_by(|a, b| a.group.cmp(&b.group).then(b.size.cmp(&a.size)));
 
     Browser {
@@ -592,7 +593,7 @@ pub fn scan() -> Vec<Browser> {
     let running = crate::junk::running_apps();
     CHROMIUM
         .iter()
-        .filter(|(_, _, _, d, _)| lib.join(d).is_dir())
+        .filter(|(_, _, _, d, _)| crate::safe_fs::open_dir(&lib.join(d)).is_ok())
         .map(|(n, id, app, d, c)| scan_browser(n, id, find_app(id, app), lib.join(d), lib.join(c), &running))
         .collect()
 }
@@ -665,7 +666,7 @@ pub fn app_icon_file(app: &Path) -> Option<String> {
 
 /// Website icons a profile has already saved, by website: the PNG closest
 /// to 32 px for each. Read from the browser's own "Favicons" database,
-/// opened read-only and as immutable, so it is never changed or locked.
+/// opened read-only and marked immutable for this connection.
 /// Nothing is fetched from the internet.
 pub fn favicons(profile_dir: &Path) -> HashMap<String, Vec<u8>> {
     let mut out: HashMap<String, (i64, Vec<u8>)> = HashMap::new();
@@ -721,7 +722,7 @@ pub fn favicon_for<'a>(icons: &'a HashMap<String, Vec<u8>>, host: &str) -> Optio
 
 /// Is this browser open right now? Checked again right before cleaning.
 pub fn is_running(bundle_id: &str) -> bool {
-    crate::junk::running_apps().contains(&bundle_id.to_lowercase())
+    crate::junk::try_running_apps().is_none_or(|apps| apps.contains(&bundle_id.to_lowercase()))
 }
 
 /// The safety net: true only for the exact kinds of folder this feature
@@ -732,6 +733,7 @@ pub fn allowed(data: &Path, cache: &Path, p: &Path) -> bool {
     if p.components()
         .any(|c| !matches!(c, Component::Normal(_) | Component::RootDir))
         || fsutil::is_symlink(p)
+        || crate::safe_fs::parent(p).is_err()
     {
         return false;
     }
@@ -812,10 +814,13 @@ pub fn clean(plans: Vec<Plan>) -> Outcome {
                 continue;
             }
             if group == Group::Junk {
-                let ok = paths
-                    .iter()
-                    .filter(|p| fsutil::lexists(p))
-                    .all(|p| std::fs::remove_dir_all(p).is_ok() || !fsutil::lexists(p));
+                let ok = paths.iter().all(|p| {
+                    let is_cache = p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| PROFILE_JUNK.contains(&n) || SHARED_JUNK.contains(&n));
+                    is_cache && matches!(crate::safe_fs::remove(p, false), Ok(()) | Err(rustix::io::Errno::NOENT))
+                });
                 if ok {
                     out.deleted += size;
                 } else {
@@ -938,7 +943,10 @@ mod tests {
 
     #[test]
     fn scan_sorts_everything_into_the_right_group() {
-        let root = std::env::temp_dir().join(format!("ms-browsers-scan-{}", std::process::id()));
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ms-browsers-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (data, cache) = fake(&root);
         let b = scan_browser("Chrome", "com.google.Chrome", None, data, cache, &[]);
@@ -975,8 +983,27 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_skips_profiles_with_a_linked_parent() {
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ms-browser-parent-{}", std::process::id()));
+        let (data, cache) = fake(&root);
+        let profile = data.join("Default");
+        let saved = root.join("retained-profile");
+        std::fs::rename(&profile, &saved).unwrap();
+        std::os::unix::fs::symlink(&saved, &profile).unwrap();
+        assert!(!allowed(&data, &cache, &profile.join("Cache")));
+        assert!(!profile_dirs(&data).contains(&"Default".to_string()));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn safety_check_refuses_everything_else() {
-        let root = std::env::temp_dir().join(format!("ms-browsers-allow-{}", std::process::id()));
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ms-browsers-allow-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let (data, cache) = fake(&root);
         let p = data.join("Default");
@@ -1013,7 +1040,10 @@ mod tests {
 
     #[test]
     fn website_icons_come_from_the_profiles_own_database() {
-        let root = std::env::temp_dir().join(format!("ms browsers fav {}", std::process::id()));
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ms browsers fav {}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         {
@@ -1043,7 +1073,10 @@ mod tests {
 
     #[test]
     fn profiles_are_listed_in_the_browsers_order() {
-        let root = std::env::temp_dir().join(format!("ms-browsers-prof-{}", std::process::id()));
+        let root = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join(format!("ms-browsers-prof-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         for d in [
             "Profile 10",

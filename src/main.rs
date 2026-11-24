@@ -10,6 +10,9 @@ mod junk;
 mod large;
 mod leveldb;
 mod monitor;
+mod running_app;
+mod safe_fs;
+mod safety_log;
 #[path = "../monitor/src/shared.rs"]
 mod shared;
 mod theme;
@@ -644,6 +647,7 @@ fn main() -> eframe::Result {
         return Ok(());
     }
 
+    safety_log::event(false, "Opening the main window");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("MacSweep")

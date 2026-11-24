@@ -116,6 +116,8 @@ Some cleaners have wiped people's browser profiles and email. MacSweep is built 
 
 ## Build from source
 
+The fork includes a shared Xcode scheme, safety checks, and Developer ID signing instructions. See [the fork project notes](PROJECT.md).
+
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # one-time Rust install
 git clone https://github.com/nihal4/macsweep && cd macsweep
@@ -148,7 +150,7 @@ Pull requests are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md). The o
 - [`trash`](https://crates.io/crates/trash) for Finder-compatible Trash, [`icns`](https://crates.io/crates/icns) for app icons, [`plist`](https://crates.io/crates/plist) for app metadata
 - No bundled text fonts: San Francisco and the Mac's own fallback fonts are memory-mapped from disk; the icon font holds only the icons used
 - The menu bar monitor is a separate tiny native app (AppKit through [`objc2`](https://crates.io/crates/objc2)), so MacSweep itself doesn't stay open
-- Browser Cleanup reads Chrome's own indexes with a small read-only LevelDB reader, and website icons from the browser's icon database with the system SQLite
+- Browser Cleanup reads Chrome's own indexes with a small read-only LevelDB reader, and website icons from the browser's icon database with a bundled, patched SQLite
 
 Releases are built by GitHub Actions: push a tag such as `v0.3.0` and a universal `.app` is attached to a new release, with notes taken from [CHANGELOG.md](CHANGELOG.md).
 
