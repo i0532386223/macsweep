@@ -39,7 +39,7 @@ codesign --verify --strict --deep --verbose=2 dist/MacSweep.app
 codesign -d --verbose=4 dist/MacSweep.app
 ```
 
-For a production build, install both Rust targets and build a universal application. Use a saved Apple notarytool profile to submit the signed bundle. After Apple accepts the submission, the script attaches the ticket, archives the app with `ditto`, extracts the final ZIP and checks the signatures, ticket and Gatekeeper assessment. The transfer archive is `dist/MacSweep-<version>-universal.zip`. [Apple notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
+For a production build, install both Rust targets and build a universal application. Use a saved Apple notarytool profile to submit the signed bundle. After Apple accepts the submission, the script attaches the ticket, archives the app with `ditto`, extracts the final ZIP and checks the signatures, ticket and Gatekeeper assessment. The transfer archive is `dist/MacSweep-<version>-universal.zip`. A Developer ID build with `ZIP=1` also runs the notarization script and requires a Keychain profile. [Apple notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
 
 ```sh
 rustup target add aarch64-apple-darwin x86_64-apple-darwin

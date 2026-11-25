@@ -2,7 +2,7 @@
 # Builds dist/MacSweep.app
 #   ./bundle.sh              build for this Mac only
 #   UNIVERSAL=1 ./bundle.sh  build one app for Apple Silicon + Intel
-#   ZIP=1 ./bundle.sh        also create dist/MacSweep-<version>.zip for a release
+#   ZIP=1 ./bundle.sh        archive the build; a Developer ID archive requires NOTARY_PROFILE
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -99,7 +99,9 @@ if [[ -z "$SIGN_ID" && -n "${MACSWEEP_SIGN_TEAM:-}" && "${ADHOC:-0}" != "1" ]]; 
         exit 1
     fi
 fi
+DEVELOPER_SIGNED=0
 if [[ -n "$SIGN_ID" ]]; then
+    DEVELOPER_SIGNED=1
     # The inner helper requires no Apple events. Only the host can ask Finder to move an item.
     codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$HELPER"
     codesign --force --options runtime --timestamp --entitlements signing/MacSweep.entitlements --sign "$SIGN_ID" "$APP"
@@ -125,6 +127,9 @@ fi
 echo "Built dist/MacSweep.app v${VERSION}. Signing identity: $SIGN_ID"
 
 if [[ "${ZIP:-0}" == "1" ]]; then
+    if [[ "$DEVELOPER_SIGNED" == "1" ]]; then
+        exec ./scripts/notarize.sh
+    fi
     (cd dist && ditto -c -k --keepParent MacSweep.app "MacSweep-${VERSION}.zip")
     echo "Packed dist/MacSweep-${VERSION}.zip"
 fi
