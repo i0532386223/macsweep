@@ -1,10 +1,12 @@
 mod agents;
 mod browsers;
 mod browsers_ui;
+mod disk_map;
 mod dupes;
 mod fsutil;
 mod health;
 mod health_ui;
+mod icloud;
 mod job;
 mod junk;
 mod large;
@@ -15,6 +17,7 @@ mod safe_fs;
 mod safety_log;
 #[path = "../monitor/src/shared.rs"]
 mod shared;
+mod storage_ui;
 mod theme;
 mod uninstall;
 mod update;
@@ -28,6 +31,8 @@ enum Pane {
     Smart,
     Junk,
     Large,
+    DiskMap,
+    Cloud,
     Dupes,
     Apps,
     Browsers,
@@ -36,10 +41,12 @@ enum Pane {
 }
 
 impl Pane {
-    const ALL: [Pane; 8] = [
+    const ALL: [Pane; 10] = [
         Pane::Smart,
         Pane::Junk,
         Pane::Large,
+        Pane::DiskMap,
+        Pane::Cloud,
         Pane::Dupes,
         Pane::Apps,
         Pane::Browsers,
@@ -51,6 +58,8 @@ impl Pane {
             Pane::Smart => "Smart Scan",
             Pane::Junk => "System Junk",
             Pane::Large => "Large & Old Files",
+            Pane::DiskMap => "Disk Map",
+            Pane::Cloud => "iCloud Downloads",
             Pane::Dupes => "Duplicates",
             Pane::Apps => "Uninstaller",
             Pane::Browsers => "Browser Cleanup",
@@ -63,6 +72,8 @@ impl Pane {
             Pane::Smart => icon::SPARKLE,
             Pane::Junk => icon::BROOM,
             Pane::Large => icon::FOLDER,
+            Pane::DiskMap => icon::HARD_DRIVE,
+            Pane::Cloud => icon::ARROW_CIRCLE_UP,
             Pane::Dupes => icon::COPY,
             Pane::Apps => icon::PACKAGE,
             Pane::Browsers => icon::GLOBE,
@@ -75,6 +86,8 @@ impl Pane {
             Pane::Smart => theme::SMART,
             Pane::Junk => theme::JUNK,
             Pane::Large => theme::LARGE,
+            Pane::DiskMap => theme::MONITOR,
+            Pane::Cloud => theme::BROWSERS,
             Pane::Dupes => theme::DUPES,
             Pane::Apps => theme::APPS,
             Pane::Browsers => theme::BROWSERS,
@@ -193,6 +206,8 @@ struct App {
     switched_at: f64,
     junk: junk::Junk,
     large: large::Large,
+    disk_map: storage_ui::DiskPane,
+    cloud: storage_ui::CloudPane,
     dupes: dupes::Dupes,
     apps: uninstall::Uninstaller,
     browsers: browsers_ui::BrowsersPane,
@@ -216,6 +231,8 @@ impl App {
             switched_at: -10.0,
             junk: Default::default(),
             large: Default::default(),
+            disk_map: Default::default(),
+            cloud: Default::default(),
             dupes: Default::default(),
             apps: Default::default(),
             browsers: Default::default(),
@@ -262,9 +279,10 @@ impl App {
                     ui.label(theme::bold("MacSweep", 20.0));
                 });
                 ui.add_space(14.0);
+                let row_height = ((ui.available_height() - 177.0) / Pane::ALL.len() as f32 - 5.0).clamp(29.0, 42.0);
                 for pane in Pane::ALL {
                     let selected = self.pane == pane;
-                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::click());
+                    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click());
                     let painter = ui.painter();
                     if selected || resp.hovered() {
                         painter.rect_filled(rect, 11, Color32::from_white_alpha(if selected { 45 } else { 18 }));
@@ -625,6 +643,13 @@ impl eframe::App for App {
                 Pane::Smart => self.smart(ui, p, now),
                 Pane::Junk => self.junk.ui(ui, p),
                 Pane::Large => self.large.ui(ui, p),
+                Pane::DiskMap => {
+                    if let Some(path) = self.disk_map.ui(ui) {
+                        self.cloud.select(ui.ctx(), path);
+                        self.go(Pane::Cloud, now);
+                    }
+                }
+                Pane::Cloud => self.cloud.ui(ui),
                 Pane::Dupes => self.dupes.ui(ui, p),
                 Pane::Apps => self.apps.ui(ui, p),
                 Pane::Browsers => self.browsers.ui(ui, p),
