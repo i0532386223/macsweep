@@ -7,8 +7,8 @@
 **A free, open-source Mac cleaner written in Rust.**
 Clean junk, find big forgotten files and duplicates, fully uninstall apps, clean each browser site by site, and check your battery and SSD health, all from one small native app.
 
-[![Latest release](https://img.shields.io/github/v/release/nihal4/macsweep?label=download&color=c04fd0)](https://github.com/nihal4/macsweep/releases/latest)
-[![CI](https://github.com/nihal4/macsweep/actions/workflows/ci.yml/badge.svg)](https://github.com/nihal4/macsweep/actions/workflows/ci.yml)
+[![Upstream release](https://img.shields.io/github/v/release/nihal4/macsweep?label=upstream&color=c04fd0)](https://github.com/nihal4/macsweep/releases/latest)
+[![CI](https://github.com/i0532386223/macsweep/actions/workflows/ci.yml/badge.svg)](https://github.com/i0532386223/macsweep/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 ![macOS 11+](https://img.shields.io/badge/macOS-11%2B-black?logo=apple)
 ![Apple Silicon & Intel](https://img.shields.io/badge/Apple%20Silicon%20%26%20Intel-universal-555)
@@ -16,7 +16,7 @@ Clean junk, find big forgotten files and duplicates, fully uninstall apps, clean
 
 ![Smart Scan](docs/smart-scan-results.jpg)
 
-[**⬇ Download MacSweep**](https://github.com/nihal4/macsweep/releases/latest) · [Website](https://macsweep-app.netlify.app/) · [Report a bug](https://github.com/nihal4/macsweep/issues/new?template=bug_report.md) · [Request a feature](https://github.com/nihal4/macsweep/issues/new?template=feature_request.md)
+[**Upstream downloads**](https://github.com/nihal4/macsweep/releases/latest) · [Build this fork](PROJECT.md) · [Upstream website](https://macsweep-app.netlify.app/) · [Report a bug](https://github.com/nihal4/macsweep/issues/new?template=bug_report.md) · [Request a feature](https://github.com/nihal4/macsweep/issues/new?template=feature_request.md)
 
 </div>
 
@@ -36,6 +36,8 @@ Clean junk, find big forgotten files and duplicates, fully uninstall apps, clean
 | ✨ **Smart Scan** | One click finds caches, logs, build leftovers and Trash, and shows a summary by category. |
 | 🧹 **System Junk** | Review every category and file before cleaning, with per-file checkboxes. Developer (Xcode, npm, Gradle) and ML-model caches (Hugging Face, PyTorch) are included. |
 | 📁 **Large & Old Files** | Finds big files in your home folder, grouped by kind (videos, archives, installers, models & data…), with a "not opened in a year" filter. |
+| **Disk Map** | Explore the startup data volume, home folder, iCloud Drive or a selected folder or volume. Click a tile to open a folder or inspect a file. |
+| **iCloud Downloads** | Remove the local copy of a fully uploaded file after confirmation. The original stays in iCloud Drive. |
 | 🗂️ **Duplicates** | Finds exact duplicate files (same size and same BLAKE3 content hash) in Desktop, Documents, Downloads, Pictures, Movies and Music. Always keeps at least one copy, never looks inside Photos/Music libraries or app data, and moves extras to the Trash. |
 | 📦 **Uninstaller** | Every app with its icon, version, App Store / Apple Silicon / Intel badges, last-opened date and **true size including leftovers**. Select several apps at once. |
 | 🌐 **Browser Cleanup** | For Chrome, Brave, Edge, Arc, Vivaldi, Opera and Chromium: the AI models each browser downloaded (like Chrome's Gemini Nano), website data per site and profile (where **web games keep their saves**, never ticked for you) and cache. Filter by profile, search and sort. Passwords, cookies, history, bookmarks and sign-ins are never touched. |
@@ -75,15 +77,9 @@ Clean junk, find big forgotten files and duplicates, fully uninstall apps, clean
 
 ## Install
 
-1. Download **`MacSweep-x.y.z.zip`** from [Releases](https://github.com/nihal4/macsweep/releases/latest), unzip it, and move **MacSweep** to **Applications**.
-2. MacSweep isn't notarized by Apple yet (that needs a paid developer account), so macOS blocks it the first time. Either:
-   - Open it once, click **Done**, then go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway** (macOS 15 Sequoia and later; on older macOS you can right-click the app → **Open**), or
-   - run this once in Terminal:
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/MacSweep.app
-   ```
-3. Turn on **System Settings → Privacy & Security → Full Disk Access** for MacSweep, then reopen it (or click **Relaunch** in the sidebar).
-4. The first time you remove something, allow MacSweep to control **Finder**. It uses Finder to move files to the Trash, so **Put Back** works.
+1. Unzip the production archive for this fork, move **MacSweep** to **Applications** and open it. The universal archive supports Apple Silicon and Intel. For a source build, follow the [Xcode and notarization instructions](PROJECT.md).
+2. To scan protected directories, allow **System Settings → Privacy & Security → Full Disk Access** for MacSweep and reopen it.
+3. When you first move an item to the Trash, macOS can ask for permission to control **Finder**.
 
 <details>
 <summary><b>Full Disk Access still shows as off?</b></summary>
@@ -95,11 +91,7 @@ Clean junk, find big forgotten files and duplicates, fully uninstall apps, clean
 
 ## Updating
 
-When a new version is out, MacSweep shows it in the sidebar (from v0.3.0 on; older versions can't). To update:
-
-1. Download the new zip from [Releases](https://github.com/nihal4/macsweep/releases/latest), unzip it, quit MacSweep, and replace the copy in **Applications**.
-2. **Turn Full Disk Access on again.** Releases aren't signed with an Apple developer certificate yet, so macOS treats each new version as a new app: in System Settings → Privacy & Security → Full Disk Access, remove MacSweep with **–**, add it again with **+**, and reopen it.
-3. If you use the menu bar monitor, it switches to the new version by itself.
+MacSweep checks the [releases of this fork](https://github.com/i0532386223/macsweep/releases). To install a new version, quit the app, unzip the new production archive and replace the copy in **Applications**. The optional menu bar monitor follows the updated app.
 
 ## Safety — your data is never touched
 

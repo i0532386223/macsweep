@@ -2,6 +2,14 @@
 
 This fork of nihal4/MacSweep helps a Mac user review disk usage and remove selected items. The main Rust application uses egui. A separate AppKit helper displays CPU, memory and free space in the menu bar when enabled. The shared MacSweep Xcode scheme builds both programs and packages the helper inside the application.
 
+## Disk Map and iCloud Downloads
+
+Open **Disk Map** and choose **Startup Disk**, **Home**, **iCloud Drive**, or **Choose Folder or Volume**. On a Mac with separate system and data volumes, Startup Disk maps the data volume. Tile area represents allocated file and directory blocks. Open a folder by clicking its tile or its list entry. Use **Back** to return to the previous folder. Small entries share the **Other** tile and remain accessible in the list.
+
+The scanner reads directory metadata on a background thread and reports partial coverage. It stays on the selected file system, reads symbolic links as entries, and counts a hard-linked file once per scan. A file with zero allocated blocks has zero weight. APFS clones can share physical blocks, and snapshots or unreadable data can account for some of the difference from Finder. A folder scan can be stopped or refreshed.
+
+Use **iCloud Downloads → Choose iCloud File** or select a file in Disk Map and click **Check iCloud Download**. MacSweep shows the local allocation and asks for confirmation. It checks that the file is present locally, fully uploaded, free of sync errors and conflicts, and eligible for removal. An active transfer, a locked or linked file, or a download that macOS wants to keep stops the operation. The picker disables automatic downloading. At confirmation the app reads fresh status, compares file identity, size and modification time, and calls the Foundation eviction API on the selected file reference. Finder can download the file again from iCloud. [Apple documentation for iCloud eviction](https://developer.apple.com/documentation/foundation/filemanager/evictubiquitousitem(at:))
+
 ## Safety changes
 
 - To quit an application during removal, MacSweep uses AppKit. It compares the device and inode of each running bundle with the selected bundle. If the app declines to quit or stays open, MacSweep skips its removal.
@@ -24,14 +32,26 @@ cargo test --workspace --locked --offline
 xcodebuild -project MacSweep.xcodeproj -scheme MacSweep -configuration Release build
 ```
 
-The Xcode scheme selects a valid **Developer ID Application** identity for the configured development team. To select a specific certificate, pass its SHA-1 identifier as the build setting `MACSWEEP_SIGN_IDENTITY`. Use `ADHOC=1` for a local test build without a certificate. The packaging script signs the helper first and the main app second, with the hardened runtime and an Apple timestamp for Developer ID builds. Only the main app requests the Apple Events entitlement so it can ask Finder to move files. Signing and notarization are separate operations.
+The Xcode scheme selects a valid **Developer ID Application** identity for the configured development team. To select a specific certificate, pass its SHA-1 identifier as the build setting `MACSWEEP_SIGN_IDENTITY`. Use `ADHOC=1` for a local test build without a certificate. The packaging script signs the helper first and the main app second, with the hardened runtime and an Apple timestamp for Developer ID builds. Only the main app requests the Apple Events entitlement so it can ask Finder to move files.
 
 ```sh
 codesign --verify --strict --deep --verbose=2 dist/MacSweep.app
 codesign -d --verbose=4 dist/MacSweep.app
 ```
 
-## Verification on November 24, 2026
+For a production build, install both Rust targets and build a universal application. Use a saved Apple notarytool profile to submit the signed bundle. After Apple accepts the submission, the script attaches the ticket, archives the app with `ditto`, extracts the final ZIP and checks the signatures, ticket and Gatekeeper assessment. The transfer archive is `dist/MacSweep-<version>-universal.zip`. [Apple notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow)
+
+```sh
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+xcodebuild -project MacSweep.xcodeproj -scheme MacSweep -configuration Release UNIVERSAL=1 build
+NOTARY_PROFILE=YourKeychainProfile ./scripts/notarize.sh
+```
+
+## Version 0.4.0 verification
+
+The local run passed 75 application tests and 5 monitor tests. The tests exercise allocated block sizes, sparse files, hard links, directory links, cancellation and tile geometry. A UI test opens a folder, returns to its parent, selects a file, and checks its status in iCloud Downloads. The confirmation screen allows cancellation. When the preview is stale, the real Foundation check rejects an ordinary file and preserves its contents. Injected provider responses cover an eligible file, a sync failure and a changed identity at confirmation.
+
+## Version 0.3.0 verification on November 24, 2026
 
 - Rust 1.97.1 and Xcode 27.1 built the arm64 Release application. The executable declares macOS 11.0 as its minimum. Runtime checks used the current Apple Silicon Mac.
 - All 68 main application tests and all 5 monitor tests passed. The formatting and Clippy checks passed. Filesystem tests used temporary directories, including a rejected Finder request, an existing item in the Trash, linked directories and an edited duplicate with the original size.
@@ -42,7 +62,7 @@ codesign -d --verbose=4 dist/MacSweep.app
 
 ## Comparison with Purge
 
-The comparison uses MacSweep upstream commit `b7480f4` and Purge commit `db58c41`. It is based on the two source trees. The changes above cover the safety of existing MacSweep features.
+The comparison uses MacSweep upstream commit `b7480f4` and Purge commit `db58c41`. It is based on the two source trees. The table describes upstream at that revision. Version 0.4.0 of this fork adds the disk map, scanning selected folders or volumes, and removal of local iCloud downloads as described above.
 
 | Area | MacSweep | Additional Purge functions |
 |---|---|---|

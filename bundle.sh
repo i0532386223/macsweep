@@ -22,7 +22,12 @@ HELPER="$APP/Contents/Library/LoginItems/MacSweep Monitor.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$HELPER/Contents/MacOS" "$HELPER/Contents/Resources"
 
 if [[ "${UNIVERSAL:-0}" == "1" ]]; then
-    rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+    for target in aarch64-apple-darwin x86_64-apple-darwin; do
+        libdir=$("${RUSTC:-rustc}" --print target-libdir --target "$target")
+        if ! compgen -G "$libdir/libstd-*.rlib" >/dev/null; then
+            rustup target add "$target"
+        fi
+    done
     "$CARGO_BIN" build --locked --release --workspace --target aarch64-apple-darwin
     "$CARGO_BIN" build --locked --release --workspace --target x86_64-apple-darwin
     lipo -create -output "$APP/Contents/MacOS/MacSweep" \

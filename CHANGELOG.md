@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.4.0 (fork)
+
+- Disk Map shows allocated space by file and folder for the startup data volume, home folder, iCloud Drive, and selected folders or volumes.
+- iCloud Downloads can remove a confirmed local download while keeping the uploaded original in iCloud Drive.
+- The production packaging script submits the signed app to Apple, attaches the accepted ticket and verifies the extracted transfer archive.
+
 ## v0.3.0
 
 ### New: Mac Health
